@@ -1,5 +1,5 @@
 /* Hazina Money service worker: offline app shell + background Google Drive backup. */
-const VERSION = 'hazina-v4';
+const VERSION = 'hazina-v5';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './jspdf.umd.min.js', './jspdf.plugin.autotable.min.js'];
 const FONT_CACHE = 'hazina-fonts';
 

@@ -128,7 +128,9 @@ h1,h2,h3{font-family:var(--f-display);margin:0;text-wrap:balance;letter-spacing:
 .hero-num small{font-size:.5em;font-weight:500;color:var(--hero-muted);margin-right:4px;letter-spacing:0}
 .hero-delta{font-size:13px;color:var(--hero-muted);margin-top:4px}
 .hero-spark{display:block;width:100%;height:56px;margin-block:10px 6px}
-.hero-split{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--hero-line);padding-top:12px;gap:8px}
+.hero-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid var(--hero-line);padding-top:12px;gap:10px 12px}
+@media (min-width:560px){.hero-split{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.tx-amt.plus{color:var(--accent)}
 .hero-split div{min-width:0}
 .hero-split span{display:block;font-size:11.5px;color:var(--hero-muted)}
 .hero-split b{display:block;font-weight:600;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -384,7 +386,7 @@ const NEEDS = new Set(['rent','food','transport','airtime','power','water','inte
 const WANTS = new Set(['eatout','fun','clothing','household','gifts','other_ex']);
 const ACCT_KINDS = {mobile:'Mobile money', bank:'Bank', cash:'Cash', sacco:'SACCO / savings'};
 const INV_TYPES = {mmf:'Money market fund', tbill:'Treasury bill', tbond:'Treasury bond', sacco:'SACCO deposits & shares', nse:'NSE shares', chama:'Chama / investment group', land:'Land & real estate', pension:'Pension (NSSF / personal)', fixed:'Fixed deposit', unit:'Unit trust / ETF', other:'Other'};
-const DEBT_TYPES = {helb:'HELB', fuliza:'Fuliza', mshwari:'M-Shwari / KCB M-Pesa', digital:'Digital lender (Tala, Branch…)', sacco:'SACCO loan', bank:'Bank loan', hustler:'Hustler Fund', chama:'Chama loan', car:'Car / asset finance', mortgage:'Mortgage', card:'Credit card', personal:'Friend / family', other:'Other'};
+const DEBT_TYPES = {helb:'HELB', fuliza:'Fuliza', mshwari:'M-Shwari / KCB M-Pesa', digital:'Digital lender (Tala, Branch…)', sacco:'SACCO loan', bank:'Bank loan', hustler:'Hustler Fund', chama:'Chama loan', car:'Car / asset finance', mortgage:'Mortgage', card:'Credit card', personal:'Person (friend, family, colleague)', other:'Other'};
 const TYPE_LABEL = {expense:'Expense', income:'Income', transfer:'Transfer'};
 
 /* PAYE, Kenya — monthly. NSSF Year 4 limits (from Feb 2026), SHIF 2.75% (min 300), Housing Levy 1.5%.
@@ -423,14 +425,14 @@ const HOST_THEME = document.documentElement.getAttribute('data-theme');
 function freshProfile(){
   return {v:1, settings:{name:'', theme:'system', debtStrategy:'avalanche', tithe:{on:true, pct:10}},
     accounts:[{id:'mpesa',name:'M-Pesa',kind:'mobile',opening:0},{id:'bank',name:'Bank account',kind:'bank',opening:0},{id:'cash',name:'Cash',kind:'cash',opening:0}],
-    budgets:{}, investments:[], debts:[], goals:[]};
+    budgets:{}, investments:[], debts:[], lent:[], goals:[]};
 }
 function normalize(p){
   const f = freshProfile();
   p = p && typeof p === 'object' ? p : {};
   return {v:1, settings:Object.assign(f.settings, p.settings||{}), accounts:Array.isArray(p.accounts)&&p.accounts.length?p.accounts:f.accounts,
     budgets:p.budgets&&typeof p.budgets==='object'?p.budgets:{}, investments:Array.isArray(p.investments)?p.investments:[],
-    debts:Array.isArray(p.debts)?p.debts:[], goals:Array.isArray(p.goals)?p.goals:[]};
+    debts:Array.isArray(p.debts)?p.debts:[], lent:Array.isArray(p.lent)?p.lent:[], goals:Array.isArray(p.goals)?p.goals:[]};
 }
 
 /* ---------- derived data ---------- */
@@ -444,7 +446,10 @@ const txIn = (f,t) => txAll().filter(x => x.date >= f && x.date <= t);
 function findTxn(id){ return txAll().find(t => t.id === id); }
 function sums(list){ let inc=0, exp=0, inv=0; for (const t of list) { if (t.type==='income') inc+=t.amount; else if (t.type==='expense') exp+=t.amount; else if (t.type==='transfer' && String(t.to).startsWith('inv:')) inv+=t.amount; } return {inc, exp, inv, net:inc-exp}; }
 function byCat(list, type){ const m = {}; for (const t of list) if (t.type===type) m[t.cat] = (m[t.cat]||0) + t.amount; return Object.entries(m).sort((a,b) => b[1]-a[1]); }
-const acctName = id => { if (String(id).startsWith('inv:')) { const i = S.investments.find(x => 'inv:'+x.id === id); return i ? i.name : 'Investment'; } const a = S.accounts.find(x => x.id === id); return a ? a.name : 'Deleted account'; };
+const acctName = id => { const sid = String(id);
+  if (sid.startsWith('lent:')) { const L = S.lent.find(x => 'lent:'+x.id === sid); return L ? L.name + ' (owes you)' : 'Deleted loan'; }
+  if (sid.startsWith('debt:')) { const d = S.debts.find(x => 'debt:'+x.id === sid); return d ? d.name : 'Deleted loan'; }
+  if (sid.startsWith('inv:')) { const i = S.investments.find(x => 'inv:'+x.id === id); return i ? i.name : 'Investment'; } const a = S.accounts.find(x => x.id === id); return a ? a.name : 'Deleted account'; };
 function acctBalance(id, upto){
   const a = S.accounts.find(x => x.id === id); let b = a ? num(a.opening) : 0;
   for (const t of txAll()) { if (upto && t.date > upto) continue;
@@ -456,6 +461,10 @@ function acctBalance(id, upto){
 const cashTotal = upto => sum(S.accounts, a => acctBalance(a.id, upto));
 const invTotal = () => sum(S.investments, i => num(i.value));
 const debtTotal = () => sum(S.debts, d => Math.max(0, num(d.balance)));
+const lentTotal = () => sum(S.lent, L => Math.max(0, num(L.balance)));
+const netWorthNow = () => cashTotal() + invTotal() + lentTotal() - debtTotal();
+const daysTo = iso => Math.round((new Date(+iso.slice(0,4), +iso.slice(5,7)-1, +iso.slice(8)) - new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())) / 864e5);
+function lentAt(L, iso){ if (L.date && L.date > iso) return 0; return Math.max(0, num(L.balance) + sum((L.payments||[]).filter(p => p.date > iso), p => num(p.amount))); }
 function invValueAt(inv, iso){
   if (iso >= todayISO()) return num(inv.value);
   const hist = (inv.history||[]).filter(h => h.date <= iso).sort((a,b) => a.date < b.date ? -1 : 1);
@@ -468,7 +477,7 @@ function debtAt(d, iso){
   if (d.start && d.start > iso) return 0;
   return Math.max(0, num(d.balance) + sum((d.payments||[]).filter(p => p.date > iso), p => num(p.amount)));
 }
-const netWorthAt = iso => cashTotal(iso) + sum(S.investments, i => invValueAt(i, iso)) - sum(S.debts, d => debtAt(d, iso));
+const netWorthAt = iso => cashTotal(iso) + sum(S.investments, i => invValueAt(i, iso)) + sum(S.lent, L => lentAt(L, iso)) - sum(S.debts, d => debtAt(d, iso));
 /* ---------- tithe: a set share of all income, with unpaid balance carried forward ---------- */
 const titheCfg = () => { const t = (S.settings && S.settings.tithe) || {}; return {on: t.on !== false, pct: num(t.pct) > 0 ? num(t.pct) : 10}; };
 function titheIn(f, t){ const list = txIn(f, t), p = titheCfg().pct / 100; const inc = sum(list.filter(x => x.type === 'income'), x => x.amount); const paid = sum(list.filter(x => x.type === 'expense' && x.cat === 'church'), x => x.amount); return {inc, due: inc * p, paid}; }
@@ -569,6 +578,15 @@ function makeSample(){
     if (i === -1) add(D(14), 'income', 6000, 'chama_in', 'mpesa', 'Chama merry-go-round');
   }
   for (const m in months) for (const t of months[m]) if (t.debtId) { const d = p.debts.find(x => x.id === t.debtId); d.payments.push({id:t.id, date:t.date, amount:t.amount}); }
+  const ago = n => isoOf(new Date(Date.now() - n * 864e5));
+  p.lent = [
+    {id:'s-l1', name:'Kevin Otieno', reason:'Rent top-up', principal:15000, balance:15000, date:ago(40), due:ago(6), notes:'Promised to pay in two parts', payments:[]},
+    {id:'s-l2', name:'Wanjiru', reason:'School shopping', principal:3000, balance:3000, date:ago(9), due:isoOf(new Date(Date.now() + 5 * 864e5)), notes:'', payments:[]},
+  ];
+  add(ago(40), 'transfer', 15000, null, 'mpesa', 'Lent to Kevin Otieno', {to:'lent:s-l1', lentId:'s-l1', kind:'lend', fee:100});
+  add(ago(9), 'transfer', 3000, null, 'mpesa', 'Lent to Wanjiru', {to:'lent:s-l2', lentId:'s-l2', kind:'lend', fee:53});
+  add(ago(12), 'transfer', 5000, null, 'lent:s-l1', 'Repaid by Kevin Otieno', {to:'mpesa', lentId:'s-l1', kind:'repay'});
+  for (const m in months) for (const t of months[m]) if (t.lentId) { const L = p.lent.find(x => x.id === t.lentId); if (t.kind === 'lend') L.txnId = t.id; else { L.payments.push({id:t.id, date:t.date, amount:t.amount}); L.balance -= t.amount; } }
   return {p, months};
 }
 
@@ -907,8 +925,8 @@ function txRow(t){
   let ic, cls = '', title, sub, amt;
   const meta = [t.note, null].filter(Boolean);
   if (t.type === 'transfer') {
-    cls = 'tr'; ic = '⇄'; title = String(t.to).startsWith('inv:') ? 'Invested: ' + acctName(t.to) : 'Transfer';
-    sub = `${acctName(t.acct)} → ${acctName(t.to)} · ${fmtDate(t.date).slice(0,-5)}${t.fee>0?' · +'+ksh(t.fee)+' cost':''}`; amt = `<span class="tx-amt tr">${ksh(t.amount)}</span>`;
+    cls = 'tr'; ic = '⇄'; title = t.kind === 'lend' ? 'Lent to ' + linkedName(t) : t.kind === 'repay' ? 'Repaid by ' + linkedName(t) : t.kind === 'borrow' ? 'Borrowed: ' + linkedName(t) : String(t.to).startsWith('inv:') ? 'Invested: ' + acctName(t.to) : 'Transfer';
+    sub = `${acctName(t.acct)} → ${acctName(t.to)} · ${fmtDate(t.date).slice(0,-5)}${t.fee>0?' · +'+ksh(t.fee)+' cost':''}`; amt = `<span class="tx-amt ${t.kind==='repay'||t.kind==='borrow'?'plus':'tr'}">${t.kind==='repay'||t.kind==='borrow'?'+':t.kind==='lend'?'−':''}${ksh(t.amount)}</span>`;
   } else {
     cls = t.type === 'income' ? 'in' : ''; ic = esc(CAT_INI[t.cat] || '•'); title = esc(CAT_NAME[t.cat] || 'Other');
     sub = [t.note ? esc(t.note) : '', esc(acctName(t.acct)), fmtDate(t.date).slice(0,-5), t.fee > 0 ? '+' + ksh(t.fee) + ' cost' : ''].filter(Boolean).join(' · ');
@@ -921,7 +939,7 @@ function txRow(t){
 function renderHome(){
   const today = todayISO(), cur = ymOf(today), ym = UI.month, [f,t] = monthRange(ym);
   const list = txIn(f,t), s = sums(list);
-  const cash = cashTotal(), inv = invTotal(), debt = debtTotal(), nw = cash + inv - debt;
+  const cash = cashTotal(), inv = invTotal(), debt = debtTotal(), owed = lentTotal(), nw = cash + inv + owed - debt;
   const months = [...Array(6)].map((_,i) => addMonths(cur, i-5));
   const series = months.map(m => netWorthAt(m === cur ? today : monthRange(m)[1]));
   const delta = nw - series[0];
@@ -938,6 +956,7 @@ function renderHome(){
   const budgets = Object.entries(S.budgets).filter(([,v]) => num(v) > 0).map(([c,v]) => { const sp = sum(list.filter(x => x.type==='expense' && x.cat===c), x => x.amount); return {c, v:num(v), sp, p: sp/num(v)}; }).sort((a,b) => b.p - a.p).slice(0,4);
 
   const upcoming = S.debts.filter(d => num(d.balance) > 0 && num(d.monthly) > 0 && d.dueDay).map(d => ({d, n:nextDue(d.dueDay)})).filter(x => x.n.days <= 14).sort((a,b) => a.n.days - b.n.days);
+  const comingBack = S.lent.filter(L => num(L.balance) > 0 && L.due && daysTo(L.due) <= 14).map(L => ({L, days:daysTo(L.due)})).sort((a,b) => a.days - b.days);
 
   const recent = list.slice(0,6);
   return `
@@ -949,7 +968,8 @@ function renderHome(){
     <div class="hero-split">
       <div><span>Cash & mobile</span><b>${ksh(cash)}</b></div>
       <div><span>Investments</span><b>${ksh(inv)}</b></div>
-      <div><span>Debts</span><b>${debt>0?'−':''}${ksh(debt)}</b></div>
+      <div><span>Owed to you</span><b>${ksh(owed)}</b></div>
+      <div><span>You owe</span><b>${debt>0?'−':''}${ksh(debt)}</b></div>
     </div>
   </section>
   <div class="stats">
@@ -976,7 +996,8 @@ function renderHome(){
       <div class="card-h"><h2>Accounts</h2><button class="link" data-act="go-wealth" data-tab="accounts">Manage</button></div>
       <div>${S.accounts.map(a => acctRow(a)).join('')}</div>
     </section>
-    ${upcoming.length ? `<section class="card"><div class="card-h"><h2>Due soon</h2><span class="sub">Next 14 days</span></div><div>${upcoming.map(({d,n}) => `<div class="acct"><span class="tx-ic">${n.days===0?'!':n.days}</span><span class="tx-main"><span class="tx-title">${esc(d.name)}</span><span class="tx-sub">${n.days===0?'Due today':n.days===1?'Due tomorrow':'Due '+fmtDay(n.iso)}</span></span><button class="btn sm ghost" data-act="pay-debt" data-id="${esc(d.id)}">Pay ${compact(Math.min(num(d.monthly), num(d.balance)))}</button></div>`).join('')}</div></section>` : ''}
+    ${upcoming.length ? `<section class="card"><div class="card-h"><h2>You pay soon</h2><span class="sub">Next 14 days</span></div><div>${upcoming.map(({d,n}) => `<div class="acct"><span class="tx-ic">${n.days===0?'!':n.days}</span><span class="tx-main"><span class="tx-title">${esc(d.name)}</span><span class="tx-sub">${n.days===0?'Due today':n.days===1?'Due tomorrow':'Due '+fmtDay(n.iso)}</span></span><button class="btn sm ghost" data-act="pay-debt" data-id="${esc(d.id)}">Pay ${compact(Math.min(num(d.monthly), num(d.balance)))}</button></div>`).join('')}</div></section>` : ''}
+    ${comingBack.length ? `<section class="card"><div class="card-h"><h2>Owed to you soon</h2><button class="link" data-act="go-owed">See all</button></div><div>${comingBack.map(({L,days}) => `<div class="acct"><span class="tx-ic ${days<0?'':'in'}" ${days<0?'style="background:var(--neg-tint);color:var(--neg)"':''}>${days<0?'!':days}</span><span class="tx-main"><span class="tx-title">${esc(L.name)} · ${ksh(L.balance)}</span><span class="tx-sub ${days<0?'neg':''}">${days<0?`${-days} day${days===-1?'':'s'} late`:days===0?'Due back today':days===1?'Due back tomorrow':'Due back '+fmtDay(L.due)}</span></span><button class="btn sm ghost" data-act="lent-pay" data-id="${esc(L.id)}">Got paid</button></div>`).join('')}</div></section>` : ''}
     <section class="card">
       <div class="card-h"><h2>Recent</h2><button class="link" data-act="go" data-view="activity">All activity</button></div>
       ${recent.length ? `<div class="list">${recent.map(txRow).join('')}</div>` : `<div class="empty">Nothing recorded in ${monthLabel(ym)} yet.<br><button class="btn sm" data-act="add-txn">Add a transaction</button></div>`}
@@ -1066,7 +1087,7 @@ function goalItem(g){
 /* ---------- WEALTH ---------- */
 function renderWealth(){
   const tab = UI.wealthTab;
-  const tabs = `<div class="tabs" role="tablist">${[['accounts','Accounts'],['investments','Investments'],['debts','Debts']].map(([k,l]) => `<button role="tab" aria-selected="${tab===k}" data-act="wtab" data-k="${k}">${l}</button>`).join('')}</div>`;
+  const tabs = `<div class="tabs" role="tablist">${[['accounts','Accounts'],['investments','Investments'],['debts','Debts & lending']].map(([k,l]) => `<button role="tab" aria-selected="${tab===k}" data-act="wtab" data-k="${k}">${l}</button>`).join('')}</div>`;
   let body = '';
   if (tab === 'accounts') {
     const cash = cashTotal();
@@ -1085,6 +1106,8 @@ function renderWealth(){
     </section>
     ${inv.length ? `<section class="card">${inv.map(invItem).join('')}</section>` : ''}
     <div class="note">Interest from money market funds, T-bills, T-bonds and fixed deposits usually has 15% withholding tax deducted. Infrastructure bonds are tax-exempt. Check current rates with your fund manager or CBK before investing.</div>`;
+  } else if (UI.debtSide === 'owed') {
+    body = sideTabs() + renderOwed();
   } else {
     const ds = S.debts.slice(); const strat = S.settings.debtStrategy || 'avalanche';
     ds.sort((a,b) => (num(b.balance)>0) - (num(a.balance)>0) || (strat === 'avalanche' ? num(b.rate) - num(a.rate) : num(a.balance) - num(b.balance)));
@@ -1092,7 +1115,7 @@ function renderWealth(){
     const cur = ymOf(todayISO()); let incAvg = 0; for (let i = 1; i <= 3; i++) { const [a,b] = monthRange(addMonths(cur,-i)); incAvg += sums(txIn(a,b)).inc; } incAvg /= 3;
     const dti = incAvg > 0 ? Math.round(monthly/incAvg*100) : null;
     const focus = ds.find(d => num(d.balance) > 0);
-    body = `<section class="card"><div class="card-h"><h2>What you owe</h2><button class="btn sm ghost" data-act="edit-debt">${icon('plus',2)}Add</button></div>
+    body = sideTabs() + `<section class="card"><div class="card-h"><h2>What you owe</h2><button class="btn sm ghost" data-act="edit-debt">${icon('plus',2)}Add</button></div>
       ${S.debts.length ? `<div class="kv"><div><span>Total balance</span><b>${ksh(total)}</b></div><div><span>Monthly payments</span><b>${ksh(monthly)}</b></div><div><span>Of income</span><b class="${dti>35?'neg':''}">${dti===null?'—':dti+'%'}</b></div></div>
       ${dti!==null ? `<p class="small muted" style="margin:12px 0 0">${dti<=20?'Your loan repayments are a comfortable share of income.':dti<=35?'Repayments take a noticeable share of income. Avoid new short-term loans.':'Repayments take over a third of your income. Focus on clearing the costliest debt first.'}</p>` : ''}
       <div style="margin-top:14px"><span class="eyebrow">Pay-off order</span><div class="tabs" style="margin-top:6px" role="tablist">${[['avalanche','Highest interest first'],['snowball','Smallest balance first']].map(([k,l]) => `<button role="tab" aria-selected="${strat===k}" data-act="dstrat" data-k="${k}" style="font-size:13px">${l}</button>`).join('')}</div></div>` : `<div class="empty">Add HELB, Fuliza, M-Shwari, SACCO, bank, Hustler Fund or chama loans to see your payoff plan.</div>`}
@@ -1108,6 +1131,32 @@ function invItem(i){
   <div class="kv"><div><span>Value</span><b>${ksh(i.value)}</b></div><div><span>Put in</span><b>${ksh(i.principal)}</b></div><div><span>${num(i.rate)>0?'Expected p.a.':'Gain'}</span><b>${num(i.rate)>0?num(i.rate)+'%':(g>=0?'+':'')+compact(g)}</b></div></div>
   ${mat||i.notes ? `<div class="small muted">${[mat, esc(i.notes||'')].filter(Boolean).join(' · ')}</div>` : ''}
   <div class="btns"><button class="btn sm ghost" data-act="inv-value" data-id="${esc(i.id)}">Update value</button><button class="btn sm ghost" data-act="add-txn" data-type="transfer" data-to="inv:${esc(i.id)}">Add money</button><button class="btn sm line" data-act="edit-inv" data-id="${esc(i.id)}">Edit</button></div></div>`;
+}
+function sideTabs(){
+  const side = UI.debtSide === 'owed' ? 'owed' : 'owe';
+  return `<div class="tabs" role="tablist" aria-label="Debts or money owed to you">${[['owe', 'I owe', debtTotal()], ['owed', 'Owed to me', lentTotal()]].map(([k, l, v]) => `<button role="tab" aria-selected="${side === k}" data-act="debt-side" data-k="${k}" style="height:auto;padding-block:6px;line-height:1.25">${l}<br><span class="small" style="font-weight:600">${ksh(v)}</span></button>`).join('')}</div>`;
+}
+function renderOwed(){
+  const list = S.lent.slice().sort((a, b) => (num(b.balance) > 0) - (num(a.balance) > 0) || (a.due || '9999') .localeCompare(b.due || '9999') || (a.date || '').localeCompare(b.date || ''));
+  const open = S.lent.filter(L => num(L.balance) > 0);
+  const overdue = open.filter(L => L.due && daysTo(L.due) < 0);
+  return `<section class="card"><div class="card-h"><h2>Money people owe you</h2><button class="btn sm ghost" data-act="edit-lent">${icon('plus',2)}Add</button></div>
+    ${S.lent.length ? `<div class="kv"><div><span>Total owed to you</span><b>${ksh(lentTotal())}</b></div><div><span>People</span><b>${open.length}</b></div><div><span>Overdue</span><b class="${overdue.length ? 'neg' : ''}">${ksh(sum(overdue, L => num(L.balance)))}</b></div></div>
+    <p class="small muted" style="margin:12px 0 0">Money you lend counts in your net worth until it's repaid. Record each repayment so your balances stay right.</p>`
+    : `<div class="empty">Lent money to a friend, relative or colleague? Record it here with the date they promised to pay back, and Hazina will remind you on Home.</div>`}
+  </section>
+  ${list.length ? `<section class="card">${list.map(lentItem).join('')}</section>` : ''}`;
+}
+function lentItem(L){
+  const bal = Math.max(0, num(L.balance)), pr = num(L.principal), got = Math.max(0, pr - bal), pc = pr > 0 ? Math.min(100, got / pr * 100) : 0;
+  const days = L.due ? daysTo(L.due) : null;
+  const pill = bal <= 0 ? '<span class="pill solid">Repaid</span>' : days === null ? '' : days < 0 ? `<span class="pill warn">${-days} day${days === -1 ? '' : 's'} late</span>` : days <= 7 ? `<span class="pill">Due in ${days}d</span>` : '';
+  return `<div class="item"><div class="item-h"><div><h3>${esc(L.name)}</h3><div class="muted">${[esc(L.reason || ''), L.date ? 'Lent ' + fmtDate(L.date) : ''].filter(Boolean).join(' · ')}</div></div>${pill}</div>
+  <div class="kv"><div><span>Still owes</span><b>${ksh(bal)}</b></div><div><span>Lent</span><b>${ksh(pr)}</b></div><div><span>Paid back</span><b>${ksh(got)}</b></div></div>
+  <div class="prog"><i style="width:${pc.toFixed(1)}%"></i></div>
+  <div class="brow-f"><span>${Math.round(pc)}% paid back</span><span class="${days !== null && days < 0 && bal > 0 ? 'neg' : ''}">${bal <= 0 ? 'Settled' : L.due ? 'Expected back ' + fmtDate(L.due) : 'No payback date set'}</span></div>
+  ${L.notes ? `<div class="small muted">${esc(L.notes)}</div>` : ''}
+  <div class="btns">${bal > 0 ? `<button class="btn sm ghost" data-act="lent-pay" data-id="${esc(L.id)}">Record repayment</button>` : ''}<button class="btn sm line" data-act="edit-lent" data-id="${esc(L.id)}">Edit</button></div></div>`;
 }
 function debtItem(d, focus){
   const bal = Math.max(0, num(d.balance)), paid = num(d.principal) > 0 ? Math.max(0, Math.min(100, (1 - bal/num(d.principal))*100)) : 0;
@@ -1393,13 +1442,59 @@ function openDebt(id){
   const d = id ? S.debts.find(x => x.id === id) : null;
   openSheet(d ? 'Edit loan' : 'New loan or debt', `<form class="f" data-form="debt" data-id="${d?esc(d.id):''}">
     <label class="fld"><span>Name</span><input name="name" maxlength="50" placeholder="e.g. HELB, Sacco loan, Fuliza" value="${esc(d?d.name:'')}"></label>
-    <div class="row2"><label class="fld"><span>Type</span><select name="type">${Object.entries(DEBT_TYPES).map(([k,v]) => `<option value="${k}" ${d&&d.type===k?'selected':''}>${esc(v)}</option>`).join('')}</select></label><label class="fld"><span>Lender</span><input name="lender" maxlength="40" value="${esc(d?d.lender:'')}"></label></div>
+    <div class="row2"><label class="fld"><span>Type</span><select name="type">${Object.entries(DEBT_TYPES).map(([k,v]) => `<option value="${k}" ${d&&d.type===k?'selected':''}>${esc(v)}</option>`).join('')}</select></label><label class="fld"><span>Lender (person or institution)</span><input name="lender" maxlength="40" value="${esc(d?d.lender:'')}"></label></div>
     <div class="row2"><label class="fld"><span>Original amount (KSh)</span><input name="principal" inputmode="decimal" value="${d?d.principal:''}"></label><label class="fld"><span>Balance today (KSh)</span><input name="balance" inputmode="decimal" value="${d?d.balance:''}" placeholder="Same as original"></label></div>
     <div class="row2"><label class="fld"><span>Interest % per year</span><input name="rate" inputmode="decimal" value="${d&&num(d.rate)?d.rate:''}" placeholder="e.g. 12"></label><label class="fld"><span>Monthly payment (KSh)</span><input name="monthly" inputmode="decimal" value="${d?d.monthly:''}"></label></div>
     <div class="row2"><label class="fld"><span>Due day of month</span><input name="dueDay" inputmode="numeric" value="${d&&d.dueDay?d.dueDay:''}" placeholder="1–31"></label><label class="fld"><span>Start date</span><input type="date" name="start" value="${d&&d.start?d.start:todayISO()}"></label></div>
+    ${d ? '' : `<label class="fld"><span>Money received into</span><select name="recv"><option value="">Don't add to an account (borrowed before I started)</option>${S.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></label>`}
     <label class="fld"><span>Notes</span><input name="notes" maxlength="80" value="${esc(d?d.notes:'')}"></label>
     <p class="small muted" style="margin:0">For loans charged per month (many digital lenders), multiply the monthly rate by 12.</p>
     <div class="ferr"></div><div class="f-actions">${d?'<button type="button" class="btn danger" data-act="del-debt">Delete</button>':''}<button type="submit" class="btn">Save</button></div></form>`);
+}
+function linkedName(t){
+  if (t.lentId) { const L = S.lent.find(x => x.id === t.lentId); return L ? L.name : 'deleted record'; }
+  if (t.borrowId) { const d = S.debts.find(x => x.id === t.borrowId); return d ? d.name : 'deleted loan'; }
+  return '';
+}
+function openLent(id){
+  if (guardSample()) return;
+  const L = id ? S.lent.find(x => x.id === id) : null;
+  const defAcct = (S.accounts.find(a => a.kind === 'mobile') || S.accounts[0]).id;
+  openSheet(L ? 'Edit: ' + L.name : 'Money I lent', `<form class="f" data-form="lent" data-id="${L ? esc(L.id) : ''}">
+    <label class="fld"><span>Who has the money?</span><input name="name" maxlength="40" placeholder="e.g. Kevin, Mum, Brian from work" value="${esc(L ? L.name : '')}"></label>
+    <label class="fld"><span>What for (optional)</span><input name="reason" maxlength="50" placeholder="e.g. Rent, hospital bill, school fees" value="${esc(L ? L.reason : '')}"></label>
+    <div class="row2"><label class="fld"><span>Amount lent (KSh)</span><input name="principal" inputmode="decimal" value="${L ? L.principal : ''}"></label>${L ? `<label class="fld"><span>Still owes (KSh)</span><input name="balance" inputmode="decimal" value="${L.balance}"></label>` : `<label class="fld"><span>Date lent</span><input type="date" name="date" value="${todayISO()}"></label>`}</div>
+    ${L ? `<label class="fld"><span>Date lent</span><input type="date" name="date" value="${L.date || ''}"></label>` : ''}
+    <label class="fld"><span>Expected back by (optional)</span><input type="date" name="due" value="${L && L.due ? L.due : ''}"></label>
+    ${L ? '' : `<label class="fld"><span>Sent from</span><select name="acct"><option value="">Don't take from an account (lent before I started)</option>${S.accounts.map(a => `<option value="${esc(a.id)}" ${a.id === defAcct ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
+    <label class="fld"><span>Transaction cost (KSh)</span><input name="fee" inputmode="decimal" placeholder="0"></label>
+    <div class="fee-chips"><button type="button" class="chip sm" data-act="lent-fee">Estimate M-Pesa cost</button></div>`}
+    <label class="fld"><span>Notes</span><input name="notes" maxlength="80" value="${esc(L ? L.notes : '')}" placeholder="e.g. Will pay in two parts"></label>
+    ${L ? `<p class="small muted" style="margin:0">If they won't pay the rest, set "Still owes" to 0. Deleting removes this record and its lend and repayment entries from Activity.</p>` : ''}
+    <div class="ferr" role="alert"></div><div class="f-actions">${L ? '<button type="button" class="btn danger" data-act="del-lent">Delete</button>' : ''}<button type="submit" class="btn">Save</button></div></form>`);
+}
+function openLentPay(id){
+  if (guardSample()) return;
+  const L = S.lent.find(x => x.id === id); if (!L) return;
+  const defAcct = (S.accounts.find(a => a.kind === 'mobile') || S.accounts[0]).id;
+  openSheet('Repayment from ' + L.name, `<form class="f" data-form="lent-pay" data-id="${esc(L.id)}">
+    <p class="small muted" style="margin:0">${esc(L.name)} still owes you ${ksh(L.balance)}.</p>
+    <label class="fld amt"><span>Amount received (KSh)</span><input name="amount" inputmode="decimal" value="${num(L.balance)}"></label>
+    <div class="row2"><label class="fld"><span>Received into</span><select name="acct">${S.accounts.map(a => `<option value="${esc(a.id)}" ${a.id === defAcct ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label><label class="fld"><span>Date</span><input type="date" name="date" value="${todayISO()}"></label></div>
+    <div class="ferr" role="alert"></div><div class="f-actions"><button type="submit" class="btn">Save repayment</button></div></form>`);
+}
+function openLinkedTxn(t){
+  const what = t.kind === 'lend' ? `You sent ${ksh(t.amount)} to ${esc(linkedName(t))} from ${esc(acctName(t.acct))}` : t.kind === 'repay' ? `${esc(linkedName(t))} paid back ${ksh(t.amount)} into ${esc(acctName(t.to))}` : `You received ${ksh(t.amount)} from ${esc(linkedName(t))} into ${esc(acctName(t.to))}`;
+  const effect = t.kind === 'repay' ? 'Deleting it adds the amount back to what they owe you.' : 'Deleting it removes only this money movement. The loan record stays.';
+  window.__linked = t.id;
+  openSheet(t.kind === 'lend' ? 'Money lent' : t.kind === 'repay' ? 'Repayment received' : 'Loan received', `<p style="margin:0 0 6px">${what} on ${fmtDate(t.date)}.</p>${t.fee > 0 ? `<p class="small muted" style="margin:0 0 6px">Transaction cost: ${ksh(t.fee)}</p>` : ''}<p class="small muted" style="margin:0 0 16px">${effect} To change the record itself, open it under Wealth → Debts & lending.</p><div class="f-actions"><button class="btn danger" data-act="del-linked">Delete</button><button class="btn line" data-act="close-sheet">Close</button></div>`);
+}
+function delLinked(id){
+  const t = findTxn(id); if (!t) return;
+  if (t.kind === 'repay') { const L = S.lent.find(x => x.id === t.lentId); if (L) { L.balance = num(L.balance) + t.amount; L.payments = (L.payments || []).filter(p => p.id !== t.id); } }
+  if (t.kind === 'lend') { const L = S.lent.find(x => x.id === t.lentId); if (L && L.txnId === t.id) L.txnId = ''; }
+  if (t.kind === 'borrow') { const d = S.debts.find(x => x.id === t.borrowId); if (d && d.txnId === t.id) d.txnId = ''; }
+  removeTxn(t); closeSheet(); commit({profile:true, months:[ymOf(t.date)]}); toast('Entry deleted');
 }
 function openAcct(id){
   if (guardSample()) return;
@@ -1447,7 +1542,7 @@ footer{margin-top:32px;font-size:12px;color:#52627C}</style></head><body>
 <h2>Spending by category</h2><table><tr><th>Category</th><th class="r">Amount</th><th class="r">Share</th></tr>${tr(R.exp.map(([c,v]) => [CAT_NAME[c]||c, ksh(v), pct(v,s.exp)+'%']))}</table>
 <h2>Income sources</h2><table><tr><th>Source</th><th class="r">Amount</th><th class="r">Share</th></tr>${tr(R.inc.map(([c,v]) => [CAT_NAME[c]||c, ksh(v), pct(v,s.inc)+'%']))}</table>
 <h2>Largest expenses</h2><table><tr><th>Item</th><th class="r">Date</th><th class="r">Amount</th></tr>${tr(R.top.map(t => [(CAT_NAME[t.cat]||'')+(t.note?' – '+t.note:''), fmtDate(t.date), ksh(t.amount)]))}</table>
-<h2>Position today</h2><table><tr><th>Item</th><th class="r">Amount</th></tr>${tr([...S.accounts.map(a => [a.name, ksh(acctBalance(a.id))]), ...S.investments.map(i => [i.name+' (investment)', ksh(i.value)]), ...S.debts.filter(d => num(d.balance) > 0).map(d => [d.name+' (debt)', '−'+ksh(d.balance)]), ['Net worth', ksh(cashTotal()+invTotal()-debtTotal())]])}</table>
+<h2>Position today</h2><table><tr><th>Item</th><th class="r">Amount</th></tr>${tr([...S.accounts.map(a => [a.name, ksh(acctBalance(a.id))]), ...S.investments.map(i => [i.name+' (investment)', ksh(i.value)]), ...S.lent.filter(L => num(L.balance) > 0).map(L => [L.name+' (owes you)', ksh(L.balance)]), ...S.debts.filter(d => num(d.balance) > 0).map(d => [d.name+' (you owe)', '−'+ksh(d.balance)]), ['Net worth', ksh(netWorthNow())]])}</table>
 <footer>Generated by Hazina Money on ${esc(fmtDate(todayISO()))}. All amounts in Kenya shillings.</footer></body></html>`;
   saveFile(`hazina-report-${R.f}-to-${R.t}.html`, html);
 }
@@ -1468,8 +1563,9 @@ function exportSummaryCSV(){
     ['Position today', 'Type', 'Amount (KSh)'],
     ...S.accounts.map(a => [a.name, ACCT_KINDS[a.kind] || 'Account', r0(acctBalance(a.id))]),
     ...S.investments.map(i => [i.name, INV_TYPES[i.type] || 'Investment', r0(num(i.value))]),
-    ...S.debts.filter(d => num(d.balance) > 0).map(d => [d.name, DEBT_TYPES[d.type] || 'Debt', -r0(num(d.balance))]),
-    ['Net worth', '', r0(cashTotal() + invTotal() - debtTotal())]
+    ...S.lent.filter(L => num(L.balance) > 0).map(L => [L.name, 'Owes you' + (L.due ? ' (due ' + L.due + ')' : ''), r0(num(L.balance))]),
+    ...S.debts.filter(d => num(d.balance) > 0).map(d => [d.name, 'You owe: ' + (DEBT_TYPES[d.type] || 'Debt'), -r0(num(d.balance))]),
+    ['Net worth', '', r0(netWorthNow())]
   ];
   saveFile(`hazina-summary-${R.f}-to-${R.t}.csv`, '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n'));
 }
@@ -1576,10 +1672,11 @@ function buildPDF(){
     const top10 = R.list.filter(x => x.type === 'expense').sort((a, b) => b.amount - a.amount).slice(0, 10);
     table('Largest expenses', '', {head:[['Date', 'Category', 'Note', 'Paid from', 'Amount']], body:top10.map(t => [pt(fmtDate(t.date)), pt(CAT_NAME[t.cat] || ''), pt(t.note || ''), pt(acctName(t.acct)), pk(t.amount)]), columnStyles:{0:{cellWidth:24}, 4:right}});
   }
-  const nw = cashTotal() + invTotal() - debtTotal();
+  const nw = netWorthNow();
   const pos = [...S.accounts.map(a => [pt(a.name), pt(ACCT_KINDS[a.kind] || 'Account'), pk(acctBalance(a.id))]),
     ...S.investments.map(i => [pt(i.name), pt(INV_TYPES[i.type] || 'Investment'), pk(num(i.value))]),
-    ...S.debts.filter(d => num(d.balance) > 0).map(d => [pt(d.name), pt(DEBT_TYPES[d.type] || 'Debt'), pt('-' + ksh(num(d.balance)))])];
+    ...S.lent.filter(L => num(L.balance) > 0).map(L => [pt(L.name), pt('Owes you' + (L.due ? ', due ' + fmtDate(L.due) : '')), pk(num(L.balance))]),
+    ...S.debts.filter(d => num(d.balance) > 0).map(d => [pt(d.name), pt('You owe: ' + (DEBT_TYPES[d.type] || 'Debt')), pt('-' + ksh(num(d.balance)))])];
   table('Position today', `as of ${fmtDate(todayISO())}`, {head:[['Item', 'Type', 'Amount']], body:pos, foot:[['Net worth', '', pk(nw)]], columnStyles:{2:right},
     footStyles:{fillColor:C.navy, textColor:C.white, fontStyle:'bold', fontSize:9.5}, didParseCell: d => { if (d.section === 'foot' && d.column.index === 2) d.cell.styles.halign = 'right'; }});
   if (R.list.length) {
@@ -1632,13 +1729,20 @@ document.addEventListener('click', e => {
     case 'go-wealth': UI.view = 'wealth'; UI.wealthTab = b.dataset.tab; render(); window.scrollTo(0,0); break;
     case 'month': { const d = +b.dataset.d; const cur = ymOf(todayISO()); UI.month = d === 0 ? cur : addMonths(UI.month, d); if (UI.month > cur) UI.month = cur; render(); break; }
     case 'add-txn': openTxn(null, {type:b.dataset.type, to:b.dataset.to}); break;
-    case 'edit-txn': { const t = findTxn(id); openTxn(t && t.feeOf && findTxn(t.feeOf) ? t.feeOf : id); break; }
+    case 'edit-txn': { let t = findTxn(id); if (t && t.feeOf && findTxn(t.feeOf)) t = findTxn(t.feeOf); if (t && t.kind) { if (MODE === 'sample') { guardSample(); break; } openLinkedTxn(t); } else openTxn(t ? t.id : id); break; }
     case 'fee-est': { const form = b.closest('form'), a = num(form.elements.amount.value); if (!(a > 0)) { formErr(form, 'Enter the amount first to estimate the cost.'); break; }
       let fee = 0; if (b.dataset.k !== 'till') { fee = mpesaFee(b.dataset.k === 'wd' ? MPESA_WD : MPESA_SEND, a); if (fee === null) { formErr(form, b.dataset.k === 'wd' && a < 50 ? 'The smallest agent withdrawal is KSh 50.' : 'That is above the M-Pesa limit of KSh 250,000.'); break; } }
       form.elements.fee.value = fee > 0 ? fee : ''; formErr(form, ''); updateFeeHint(form); break; }
     case 'close-sheet': closeSheet(); break;
     case 'txtype': UI.txType = b.dataset.k; render(); break;
     case 'wtab': UI.wealthTab = b.dataset.k; render(); break;
+    case 'debt-side': UI.debtSide = b.dataset.k; render(); break;
+    case 'go-owed': UI.view = 'wealth'; UI.wealthTab = 'debts'; UI.debtSide = 'owed'; render(); window.scrollTo(0,0); break;
+    case 'edit-lent': openLent(id); break;
+    case 'lent-pay': openLentPay(id); break;
+    case 'lent-fee': { const form = b.closest('form'), a = num(form.elements.principal.value); if (!(a > 0)) { formErr(form, 'Enter the amount first to estimate the cost.'); break; } const fee = mpesaFee(MPESA_SEND, a); if (fee === null) { formErr(form, 'That is above the M-Pesa limit of KSh 250,000.'); break; } form.elements.fee.value = fee > 0 ? fee : ''; formErr(form, ''); break; }
+    case 'del-linked': armDelete(b, () => delLinked(window.__linked)); break;
+    case 'del-lent': armDelete(b, () => { const lid = $('#sheet form').dataset.id; const ts = txAll().filter(t => t.lentId === lid); const ms = [...new Set(ts.map(t => ymOf(t.date)))]; ts.forEach(removeTxn); S.lent = S.lent.filter(x => x.id !== lid); closeSheet(); commit({profile:true, months:ms}); toast('Record deleted'); }); break;
     case 'period': UI.period = b.dataset.k; render(); break;
     case 'dstrat': S.settings.debtStrategy = b.dataset.k; if (MODE === 'sample') render(); else commit({profile:true}); break;
     case 'edit-budgets': openBudgets(); break;
@@ -1682,7 +1786,7 @@ document.addEventListener('click', e => {
     case 'del-txn': armDelete(b, () => { const t = findTxn($('#sheet form').dataset.id); if (!t) return; const p = linkTxn(t, -1); removeTxn(t); closeSheet(); commit({profile:p, months:[ymOf(t.date)]}); toast('Transaction deleted'); }); break;
     case 'del-goal': armDelete(b, () => { const gid = $('#sheet form').dataset.id; S.goals = S.goals.filter(g => g.id !== gid); closeSheet(); commit({profile:true}); toast('Goal deleted'); }); break;
     case 'del-inv': armDelete(b, () => { const iid = $('#sheet form').dataset.id; S.investments = S.investments.filter(g => g.id !== iid); closeSheet(); commit({profile:true}); toast('Investment deleted'); }); break;
-    case 'del-debt': armDelete(b, () => { const did = $('#sheet form').dataset.id; S.debts = S.debts.filter(g => g.id !== did); closeSheet(); commit({profile:true}); toast('Loan deleted'); }); break;
+    case 'del-debt': armDelete(b, () => { const did = $('#sheet form').dataset.id; txAll().filter(t => t.borrowId === did).forEach(removeTxn); S.debts = S.debts.filter(g => g.id !== did); closeSheet(); commit({profile:true}); toast('Loan deleted'); }); break;
     case 'del-acct': { const aid = $('#sheet form').dataset.id; if (txAll().some(t => t.acct === aid || t.to === aid)) { formErr($('#sheet form'), 'This account has transactions. Move or delete them first.'); break; } armDelete(b, () => { S.accounts = S.accounts.filter(a => a.id !== aid); closeSheet(); commit({profile:true}); toast('Account deleted'); }); break; }
   }
 });
@@ -1724,12 +1828,45 @@ document.addEventListener('submit', e => {
       else if (changed) { i.history = (i.history||[]).filter(h => h.date !== todayISO()); i.history.push({date:todayISO(), value}); }
       closeSheet(); commit({profile:true}); toast('Investment saved'); break; }
     case 'inv-value': { const v = num(E.value.value), d = E.date.value || todayISO(); if (!(v >= 0) || E.value.value.trim() === '') return formErr(f, 'Enter the current value.'); const i = S.investments.find(x => x.id === id); i.history = (i.history||[]).filter(h => h.date !== d); i.history.push({date:d, value:v}); i.history.sort((a,b) => a.date < b.date ? -1 : 1); if (d >= i.history[i.history.length-1].date) i.value = v; closeSheet(); commit({profile:true}); toast('Value updated'); break; }
+    case 'lent': {
+      const name = E.name.value.trim(), principal = Math.round(num(E.principal.value) * 100) / 100, date = E.date.value || todayISO();
+      if (!name) return formErr(f, 'Enter who has the money.');
+      if (!(principal > 0)) return formErr(f, 'Enter the amount you lent.');
+      if (E.due.value && E.due.value < date) return formErr(f, 'The payback date can\'t be before the date you lent the money.');
+      const mths = new Set();
+      if (id) {
+        const L = S.lent.find(x => x.id === id); const bal = num(E.balance.value);
+        if (!(bal >= 0) || E.balance.value.trim() === '') return formErr(f, 'Enter how much they still owe, or 0 if settled.');
+        Object.assign(L, {name, reason:E.reason.value.trim(), principal, balance:bal, date, due:E.due.value, notes:E.notes.value.trim()});
+        const t = L.txnId && findTxn(L.txnId);
+        if (t && (t.amount !== principal || t.date !== date)) { mths.add(ymOf(t.date)); removeTxn(t); t.amount = principal; t.date = date; t.note = 'Lent to ' + name; (M[ymOf(date)] ||= []).push(t); if (t.fee > 0) M[ymOf(date)].push(feeChild(t)); mths.add(ymOf(date)); }
+      } else {
+        const L = {id:uid(), name, reason:E.reason.value.trim(), principal, balance:principal, date, due:E.due.value, notes:E.notes.value.trim(), payments:[]};
+        if (E.acct.value) {
+          const fee = Math.max(0, Math.round(num(E.fee.value) * 100) / 100);
+          const t = {id:uid(), ts:Date.now(), type:'transfer', acct:E.acct.value, to:'lent:' + L.id, amount:principal, date, note:'Lent to ' + name, lentId:L.id, kind:'lend'};
+          if (fee > 0) t.fee = fee;
+          (M[ymOf(date)] ||= []).push(t); if (fee > 0) M[ymOf(date)].push(feeChild(t)); L.txnId = t.id; mths.add(ymOf(date));
+        }
+        S.lent.push(L);
+      }
+      UI.debtSide = 'owed'; closeSheet(); commit({profile:true, months:[...mths]}); toast('Saved'); break; }
+    case 'lent-pay': {
+      const L = S.lent.find(x => x.id === id), amt = Math.round(num(E.amount.value) * 100) / 100, date = E.date.value || todayISO();
+      if (!(amt > 0)) return formErr(f, 'Enter the amount you received.');
+      if (amt > num(L.balance) + 0.5) return formErr(f, `That's more than the ${ksh(L.balance)} they owe. Edit the record if the amount lent was different.`);
+      const t = {id:uid(), ts:Date.now(), type:'transfer', acct:'lent:' + L.id, to:E.acct.value, amount:amt, date, note:'Repaid by ' + L.name, lentId:L.id, kind:'repay'};
+      (M[ymOf(date)] ||= []).push(t);
+      L.balance = Math.max(0, Math.round((num(L.balance) - amt) * 100) / 100); (L.payments ||= []).push({id:t.id, date, amount:amt});
+      closeSheet(); commit({profile:true, months:[ymOf(date)]}); toast(L.balance <= 0 ? `${L.name} has paid you back in full` : 'Repayment saved'); break; }
     case 'debt': { const name = E.name.value.trim(), principal = num(E.principal.value); if (!name) return formErr(f, 'Give the loan a name.'); if (!(principal > 0)) return formErr(f, 'Enter the original amount borrowed.');
       const balance = E.balance.value.trim() === '' ? principal : num(E.balance.value); const due = Math.round(num(E.dueDay.value));
       if (E.dueDay.value.trim() && (due < 1 || due > 31)) return formErr(f, 'Due day must be between 1 and 31.');
       const d = id ? S.debts.find(x => x.id === id) : {id:uid(), payments:[]};
       Object.assign(d, {name, type:E.type.value, lender:E.lender.value.trim(), principal, balance, rate:num(E.rate.value), monthly:num(E.monthly.value), dueDay:due||'', start:E.start.value, notes:E.notes.value.trim()});
-      if (!id) S.debts.push(d); closeSheet(); commit({profile:true}); toast('Loan saved'); break; }
+      let mths = [];
+      if (!id) { S.debts.push(d); if (E.recv && E.recv.value) { const t = {id:uid(), ts:Date.now(), type:'transfer', acct:'debt:'+d.id, to:E.recv.value, amount:principal, date:d.start || todayISO(), note:'Borrowed: ' + name, borrowId:d.id, kind:'borrow'}; (M[ymOf(t.date)] ||= []).push(t); d.txnId = t.id; mths = [ymOf(t.date)]; } }
+      closeSheet(); commit({profile:true, months:mths}); toast('Loan saved'); break; }
     case 'acct': { const name = E.name.value.trim(); if (!name) return formErr(f, 'Give the account a name.');
       const a = id ? S.accounts.find(x => x.id === id) : {id:uid()}; Object.assign(a, {name, kind:E.kind.value, opening:num(E.opening.value)}); if (!id) S.accounts.push(a); closeSheet(); commit({profile:true}); toast('Account saved'); break; }
     case 'backup-connect': {

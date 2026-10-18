@@ -297,6 +297,14 @@ form.f{display:grid;gap:12px}
 .key:focus-visible{outline:2px solid var(--hero-ink)}
 .lock-cancel{margin-top:6px;color:var(--hero-muted);font-weight:500;height:40px;padding-inline:16px}
 @media (max-height:600px){.keypad{grid-template-columns:repeat(3,60px);gap:10px 20px}.key{width:60px;height:60px;font-size:24px}}
+.msgarea{width:100%;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);padding:10px 12px;font:14px/1.4 var(--f-body);color:var(--ink);resize:vertical;min-height:96px;outline:none}
+.msgarea:focus{border-color:var(--accent)}
+details.msgbox{border:1px dashed var(--line);border-radius:12px;padding:10px 12px}
+details.msgbox summary{cursor:pointer;color:var(--accent);font-weight:500;font-size:14px}
+details.msgbox[open] summary{margin-bottom:10px}
+.imp.off{opacity:.6}
+.imp .fld select,.imp .fld input{height:40px;font-size:15px}
+.ok{color:var(--accent);font-weight:700;margin-left:6px;font-size:12px}
 .paye-out{display:grid;gap:0}
 .paye-out .line{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:14px}
 .paye-out .line.total{border:0;font-weight:600;font-size:16px;padding-top:12px}
@@ -413,7 +421,7 @@ function payeCalc(gross){
 const MPESA_SEND = [[100,0],[500,7],[1000,13],[1500,23],[2500,33],[3500,53],[5000,57],[7500,78],[10000,90],[15000,100],[20000,105],[35000,108],[50000,108],[250000,108]];
 const MPESA_WD = [[49,null],[100,11],[2500,29],[3500,52],[5000,69],[7500,87],[10000,115],[15000,167],[20000,185],[35000,197],[50000,278],[250000,309]];
 function mpesaFee(table, amt){ for (const [max, fee] of table) if (amt <= max) return fee; return null; }
-function feeChild(t){ return {id:t.id+'-fee', ts:(t.ts||0)-1, type:'expense', amount:t.fee, cat:'fees', acct:t.acct, date:t.date, note:'Cost: ' + (t.note || (t.type==='transfer' ? 'transfer' : CAT_NAME[t.cat] || 'payment')), feeOf:t.id}; }
+function feeChild(t){ return {id:t.id+'-fee', time:t.time, ts:(t.ts||0)-1, type:'expense', amount:t.fee, cat:'fees', acct:t.acct, date:t.date, note:'Cost: ' + (t.note || (t.type==='transfer' ? 'transfer' : CAT_NAME[t.cat] || 'payment')), feeOf:t.id}; }
 
 /* ================= state ================= */
 let S = null;          // profile: settings, accounts, budgets, investments, debts, goals
@@ -587,6 +595,25 @@ function makeSample(){
   add(ago(9), 'transfer', 3000, null, 'mpesa', 'Lent to Wanjiru', {to:'lent:s-l2', lentId:'s-l2', kind:'lend', fee:53});
   add(ago(12), 'transfer', 5000, null, 'lent:s-l1', 'Repaid by Kevin Otieno', {to:'mpesa', lentId:'s-l1', kind:'repay'});
   for (const m in months) for (const t of months[m]) if (t.lentId) { const L = p.lent.find(x => x.id === t.lentId); if (t.kind === 'lend') L.txnId = t.id; else { L.payments.push({id:t.id, date:t.date, amount:t.amount}); L.balance -= t.amount; } }
+  {
+    let r2 = 11; const rr = () => (r2 = (r2 * 48271) % 2147483647) / 2147483647;
+    const all = Object.values(months).flat(), byId = Object.fromEntries(all.map(t => [t.id, t]));
+    all.forEach(t => { if (!t.feeOf) t.time = pad(7 + Math.floor(rr() * 14)) + ':' + pad(Math.floor(rr() * 60)); });
+    all.forEach(t => { if (t.feeOf && byId[t.feeOf]) t.time = byId[t.feeOf].time; });
+    const key = t => t.date + ' ' + (t.time || '24:00') + ' ' + (t.feeOf ? 1 : 0);
+    all.sort((a, b) => key(a) < key(b) ? -1 : 1);
+    const CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789';
+    let run = p.accounts.find(a => a.id === 'mpesa').opening;
+    for (const t of all) {
+      let d = 0;
+      if (t.type === 'income' && t.acct === 'mpesa') d += t.amount;
+      else if (t.type === 'expense' && t.acct === 'mpesa') d -= t.amount;
+      else if (t.type === 'transfer') { if (t.acct === 'mpesa') d -= t.amount; if (t.to === 'mpesa') d += t.amount; }
+      run = Math.round((run + d) * 100) / 100;
+      if (t.feeOf) { const par = byId[t.feeOf]; if (par && par.ref) par.bal = run; continue; }
+      if ((t.acct === 'mpesa' || t.to === 'mpesa') && rr() < 0.85) { let c = 'T'; for (let i = 0; i < 9; i++) c += CH[Math.floor(rr() * CH.length)]; Object.assign(t, {ref:c, bal:run, balAcct:'mpesa'}); }
+    }
+  }
   return {p, months};
 }
 
@@ -762,7 +789,7 @@ function countdown(){
   const tick = () => { const left = Math.ceil((LOCK.until - Date.now())/1000); if (left <= 0) { clearInterval(cdT); lockErr(''); return; } lockErr(`Too many wrong tries. Try again in ${left} seconds.`); };
   tick(); cdT = setInterval(tick, 1000);
 }
-function unlockOk(){ const c = lockCtx; LOCK.fails = 0; LOCK.until = 0; saveLock(); hideLock(); if (c && c.onOk) c.onOk(); }
+function unlockOk(){ const c = lockCtx; LOCK.fails = 0; LOCK.until = 0; saveLock(); hideLock(); if (c && c.onOk) c.onOk(); if (c && c.mode === 'unlock') setTimeout(() => checkShared(), 60); }
 async function tryBio(){
   if (bioBusy || !LOCK.credId || !lockCtx) return; bioBusy = true;
   try { if (await bioVerify()) unlockOk(); }
@@ -932,7 +959,7 @@ function txRow(t){
     sub = [t.note ? esc(t.note) : '', esc(acctName(t.acct)), fmtDate(t.date).slice(0,-5), t.fee > 0 ? '+' + ksh(t.fee) + ' cost' : ''].filter(Boolean).join(' · ');
     amt = `<span class="tx-amt ${cls}">${t.type==='income'?'+':'−'}${ksh(t.amount)}</span>`;
   }
-  return `<button class="tx" data-act="edit-txn" data-id="${esc(t.id)}"><span class="tx-ic ${cls}">${ic}</span><span class="tx-main"><span class="tx-title">${title}</span><span class="tx-sub">${t.type==='transfer'?esc(sub):sub}</span></span>${amt}</button>`;
+  return `<button class="tx" data-act="edit-txn" data-id="${esc(t.id)}"><span class="tx-ic ${cls}">${ic}</span><span class="tx-main"><span class="tx-title">${title}${t.ref ? `<span class="ok" title="Confirmed by message ${esc(t.ref)}">✓</span>` : ''}</span><span class="tx-sub">${t.type==='transfer'?esc(sub):sub}</span></span>${amt}</button>`;
 }
 
 /* ---------- HOME ---------- */
@@ -1023,16 +1050,18 @@ function renderActivity(){
     <div class="stat"><span>Money out</span><b>${ksh(s.exp)}</b></div>
     <div class="stat"><span>Invested</span><b>${ksh(s.inv)}</b></div>
   </div>
+  <div class="btns"><button class="btn sm ghost" data-act="open-import">Import M-Pesa or bank messages</button></div>
   <div class="search">${icon('search')}<input id="txSearch" type="search" placeholder="Search notes, categories, accounts" value="${esc(UI.q)}" aria-label="Search transactions"></div>
-  <div class="chips" role="group" aria-label="Filter by type">${[['all','All'],['expense','Expenses'],['income','Income'],['transfer','Transfers']].map(([k,l]) => `<button class="chip" data-act="txtype" data-k="${k}" aria-pressed="${UI.txType===k}">${l}</button>`).join('')}</div>
+  <div class="chips" role="group" aria-label="Filter by type">${[['all','All'],['expense','Expenses'],['income','Income'],['transfer','Transfers'],['unmatched','No message']].map(([k,l]) => `<button class="chip" data-act="txtype" data-k="${k}" aria-pressed="${UI.txType===k}">${l}</button>`).join('')}</div>
   <section class="card"><div id="txList"></div></section>`;
 }
 function fillTxList(){
   const el = $('#txList'); if (!el) return;
   const [f,t] = monthRange(UI.month); const q = UI.q.trim().toLowerCase();
-  let list = txIn(f,t).filter(x => UI.txType === 'all' || x.type === UI.txType);
+  const tracked = new Set(txAll().filter(x => x.balAcct).map(x => x.balAcct));
+  let list = txIn(f,t).filter(x => UI.txType === 'all' || (UI.txType === 'unmatched' ? !x.ref && !x.feeOf && (tracked.has(x.acct) || tracked.has(x.to)) : x.type === UI.txType));
   if (q) list = list.filter(x => [x.note, CAT_NAME[x.cat], acctName(x.acct), x.to ? acctName(x.to) : '', String(x.amount)].join(' ').toLowerCase().includes(q));
-  if (!list.length) { el.innerHTML = `<div class="empty">${q || UI.txType !== 'all' ? 'No transactions match this filter.' : 'No transactions in ' + monthLabel(UI.month) + '.'}<br><button class="btn sm" data-act="add-txn">Add a transaction</button></div>`; return; }
+  if (!list.length) { el.innerHTML = `<div class="empty">${UI.txType === 'unmatched' && !q ? 'Every entry in tracked accounts has a matching message this month.' : q || UI.txType !== 'all' ? 'No transactions match this filter.' : 'No transactions in ' + monthLabel(UI.month) + '.'}<br><button class="btn sm" data-act="add-txn">Add a transaction</button></div>`; return; }
   const days = {}; for (const x of list) (days[x.date] ||= []).push(x);
   el.innerHTML = Object.keys(days).sort().reverse().map(d => { const ds = sums(days[d]); return `<div class="day-h"><span>${fmtDay(d)}</span><span>${ds.exp ? '−'+ksh(ds.exp) : ''}${ds.exp && ds.inc ? ' · ' : ''}${ds.inc ? '+'+ksh(ds.inc) : ''}</span></div><div class="list">${days[d].map(txRow).join('')}</div>`; }).join('');
 }
@@ -1093,7 +1122,8 @@ function renderWealth(){
     const cash = cashTotal();
     body = `<section class="card"><div class="card-h"><h2>Cash & mobile money</h2><span class="sub">${ksh(cash)}</span></div><div>${S.accounts.map(acctRow).join('')}</div>
       <div class="btns" style="margin-top:12px"><button class="btn sm ghost" data-act="edit-acct">${icon('plus',2)}Add account</button><button class="btn sm line" data-act="add-txn" data-type="transfer">Move money</button></div>
-      <p class="small muted" style="margin:12px 0 0">Balances start from the opening balance you set and follow every income, expense and transfer you record. Tap an account to set its opening balance.</p></section>`;
+      <p class="small muted" style="margin:12px 0 0">Balances start from the opening balance you set and follow every income, expense and transfer you record. Tap an account to set its opening balance.</p></section>
+    ${reconCard()}`;
   } else if (tab === 'investments') {
     const inv = S.investments, total = invTotal(), principal = sum(inv, i => num(i.principal)), gain = total - principal;
     const byType = {}; inv.forEach(i => byType[i.type] = (byType[i.type]||0) + num(i.value));
@@ -1333,6 +1363,9 @@ function openTxn(id, preset = {}){
   const invOpts = S.investments.map(i => `<option value="inv:${esc(i.id)}" ${toSel==='inv:'+i.id?'selected':''}>${esc(i.name)}</option>`).join('');
   const defAcct = t ? t.acct : preset.acct || (type === 'income' ? (S.accounts.find(a => a.kind==='bank')||S.accounts[0]).id : (S.accounts.find(a => a.kind==='mobile')||S.accounts[0]).id);
   const body = `<form class="f" data-form="txn" data-id="${t?esc(t.id):''}">
+    <details class="msgbox"><summary>${t && t.ref ? 'Confirmed by message ' + esc(t.ref) + ' ✓' : 'Fill from an M-Pesa or bank message'}</summary><textarea id="msgPaste" class="msgarea" rows="4" placeholder="Paste the message here"></textarea><div class="btns" style="margin-top:8px"><button type="button" class="btn sm ghost" data-act="msg-fill">Use this message</button></div></details>
+    <p class="small muted" id="msgState" style="margin:0" hidden></p>
+    <input type="hidden" name="ref" value="${esc(t && t.ref || '')}"><input type="hidden" name="bal" value="${t && t.bal !== undefined ? t.bal : ''}"><input type="hidden" name="balAcct" value="${esc(t && t.balAcct || '')}"><input type="hidden" name="time" value="${esc(t && t.time || '')}">
     <div class="seg" role="radiogroup" aria-label="Type">${['expense','income','transfer'].map(x => `<label><input type="radio" name="type" value="${x}" ${x===type?'checked':''}><span>${TYPE_LABEL[x]}</span></label>`).join('')}</div>
     <label class="fld amt"><span>Amount (KSh)</span><input name="amount" inputmode="decimal" autocomplete="off" placeholder="0" value="${t ? t.amount : (preset.amount||'')}"></label>
     <div class="small muted" id="titheHint" hidden></div>
@@ -1387,6 +1420,9 @@ function saveTxn(form){
   if (fee < 0) return formErr(form, 'Transaction cost cannot be negative.');
   const t = {id: form.dataset.id || uid(), ts: Date.now(), type, amount, date, acct: E.acct.value, note: E.note.value.trim().slice(0,80)};
   if (fee > 0) t.fee = fee;
+  if (E.ref.value) { if (txAll().some(x => x.ref === E.ref.value && x.id !== form.dataset.id)) return formErr(form, `Message ${E.ref.value} is already recorded on another entry.`); t.ref = E.ref.value; }
+  if (E.bal.value !== '') { t.bal = num(E.bal.value); t.balAcct = E.balAcct.value || E.acct.value; }
+  if (E.time.value) t.time = E.time.value;
   if (type === 'transfer') { t.to = E.to.value; if (t.to === t.acct) return formErr(form, 'Pick two different accounts to move money between.'); }
   else { t.cat = E.cat.value; if (type === 'expense' && t.cat === 'loan' && E.debtId.value) t.debtId = E.debtId.value; }
   const old = form.dataset.id ? findTxn(form.dataset.id) : null;
@@ -1736,6 +1772,28 @@ document.addEventListener('click', e => {
     case 'close-sheet': closeSheet(); break;
     case 'txtype': UI.txType = b.dataset.k; render(); break;
     case 'wtab': UI.wealthTab = b.dataset.k; render(); break;
+    case 'open-import': openImport(); break;
+    case 'imp-read': readImport(); break;
+    case 'imp-save': saveImport(); break;
+    case 'recon': openRecon(id); break;
+    case 'recon-fix': { const a = S.accounts.find(x => x.id === id); if (!a) break; a.opening = Math.round((num(a.opening) + num(b.dataset.v)) * 100) / 100; commit({profile:true}); toast('Opening balance adjusted'); openRecon(id); break; }
+    case 'show-unmatched': closeSheet(); UI.view = 'activity'; UI.txType = 'unmatched'; render(); window.scrollTo(0,0); break;
+    case 'msg-fill': {
+      const form = b.closest('form'), E = form.elements, parts = splitMsgs(form.querySelector('#msgPaste').value);
+      if (!parts.length) { formErr(form, 'Paste the full message first.'); break; }
+      const p = parseMsg(parts[0]); if (p.skip) { formErr(form, p.skip); break; }
+      const editing = !!form.dataset.id, claimed = {refs:new Set(), ids:new Set(editing ? [form.dataset.id] : [])};
+      const row = msgToRow(p, claimed);
+      if (row.ref && txAll().some(x => x.ref === row.ref && x.id !== form.dataset.id)) { formErr(form, `Message ${row.ref} is already recorded on another entry.`); break; }
+      const type = row.type === 'repay' ? 'income' : row.type;
+      if (!editing) { const r = form.querySelector(`input[name=type][value=${type}]`); if (r) r.checked = true; syncTxnForm(form); }
+      E.amount.value = row.amount; if (E.type.value !== 'income') E.fee.value = row.fee > 0 ? row.fee : (editing ? E.fee.value : ''); E.date.value = row.date;
+      if (!editing) { E.acct.value = row.acct; if (type === 'transfer') E.to.value = row.to; else if (row.cat) E.cat.value = row.cat; E.note.value = (row.note || '').slice(0, 80); syncTxnForm(form); }
+      else if (!E.note.value) E.note.value = (row.note || '').slice(0, 80);
+      E.ref.value = row.ref || ''; E.bal.value = row.bal !== undefined ? row.bal : ''; E.balAcct.value = row.balAcct || ''; E.time.value = row.time || '';
+      formErr(form, ''); const st = form.querySelector('#msgState'); st.hidden = false;
+      st.textContent = row.status === 'match' && !editing ? `This looks like your existing entry from ${fmtDate(findTxn(row.matchId).date)}. Open that entry and attach the message there instead, so it isn't counted twice.` : `Filled from message ${row.ref || ''}${row.bal !== undefined ? ' · balance after: ' + ksh(row.bal) : ''}. Check the details, then save.`;
+      form.querySelector('details.msgbox').open = false; updateFeeHint(form); updateTitheHint(form); break; }
     case 'debt-side': UI.debtSide = b.dataset.k; render(); break;
     case 'go-owed': UI.view = 'wealth'; UI.wealthTab = 'debts'; UI.debtSide = 'owed'; render(); window.scrollTo(0,0); break;
     case 'edit-lent': openLent(id); break;
@@ -1799,6 +1857,7 @@ document.addEventListener('change', e => {
     if (e.target.name === 'name') { S.settings.name = e.target.value.trim().slice(0,30); commit({profile:true}); }
     if (e.target.name === 'titheOn' || e.target.name === 'tithePct') { const v = num(f.elements.tithePct.value); S.settings.tithe = {on: f.elements.titheOn.checked, pct: v > 0 && v <= 100 ? v : 10}; if (MODE === 'real') commit({profile:true}); else render(); toast(S.settings.tithe.on ? `Tithe set to ${S.settings.tithe.pct}% of income` : 'Tithe tracking is off'); }
   }
+  if (e.target.dataset && e.target.dataset.imp) { const r = IMP[+e.target.dataset.i]; if (r) { const k = e.target.dataset.imp; r[k] = k === 'include' ? e.target.checked : e.target.value; if (k === 'type') { if (r.type === 'transfer' && !r.to) r.to = S.accounts.find(a => a.id !== r.acct).id; if (r.type === 'expense' || r.type === 'income') r.cat = guessCat(r.party, r.type); } if (k === 'type' || k === 'cat' || k === 'include') renderImport(); } }
   if (e.target.id === 'lockAfter') { LOCK.after = +e.target.value; saveLock(); }
   if (e.target.id === 'autoBackup') { META.auto = e.target.checked; saveMeta(); setStatus(); render(); if (META.auto) checkBackup(); }
   if (e.target.id === 'importFile' && e.target.files[0]) { importJSON(e.target.files[0]); e.target.value = ''; }
@@ -1808,6 +1867,7 @@ let qT = null;
 document.addEventListener('input', e => {
   if (e.target.id === 'txSearch') { UI.q = e.target.value; clearTimeout(qT); qT = setTimeout(fillTxList, 150); }
   if (e.target.form && e.target.form.dataset.form === 'txn' && (e.target.name === 'amount' || e.target.name === 'fee')) { updateFeeHint(e.target.form); updateTitheHint(e.target.form); }
+  if (e.target.form && e.target.form.dataset.form === 'recon-manual' && e.target.name === 'actual') { const id = e.target.form.dataset.id, app = acctBalance(id), v = num(e.target.value), el = $('#reconDiff'); if (el) el.textContent = e.target.value.trim() === '' ? `Hazina shows ${ksh(app)}.` : Math.abs(v - app) < 1 ? `Hazina shows ${ksh(app)}. That matches.` : `Hazina shows ${ksh(app)}, which is ${ksh(Math.abs(v - app))} ${v > app ? 'less' : 'more'} than your ${acctName(id)} app. Saving adjusts the opening balance by ${(v > app ? '+' : '−') + ksh(Math.abs(v - app))}.`; }
   if (e.target.id === 'payeGross') { UI.gross = e.target.value; updatePaye(); }
 });
 document.addEventListener('submit', e => {
@@ -1878,6 +1938,12 @@ document.addEventListener('submit', e => {
       callScript({action:'ping'}).then(async () => { META.lastError = ''; await saveMeta(); closeSheet(); toast('Connected to Google Drive'); render(); runBackup('manual'); })
         .catch(err => { META.url = prev; btn.disabled = false; btn.textContent = 'Connect and back up now'; formErr(f, err.message); });
       break; }
+    case 'recon-manual': {
+      const a = S.accounts.find(x => x.id === id); if (!a) break;
+      if (E.actual.value.trim() === '') return formErr(f, 'Enter the balance shown in your app.');
+      const diff = Math.round((num(E.actual.value) - acctBalance(id)) * 100) / 100;
+      if (Math.abs(diff) < 1) { closeSheet(); toast(`${a.name} already matches`); break; }
+      a.opening = Math.round((num(a.opening) + diff) * 100) / 100; closeSheet(); commit({profile:true}); toast(`${a.name} now matches. Opening balance adjusted by ${(diff > 0 ? '+' : '−') + ksh(Math.abs(diff))}`); break; }
     case 'openings': { S.accounts.forEach(a => { const inp = E['o_'+a.id]; if (inp) a.opening = num(inp.value); }); if (E.name.value.trim()) S.settings.name = E.name.value.trim().slice(0,30); closeSheet(); UI.view = 'home'; commit({profile:true}); toast('You\'re set. Tap + to record your first transaction.'); break; }
   }
 });
@@ -1891,6 +1957,263 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#sheetWrap').hidden) closeSheet();
 });
 
+/* ================= messages: M-Pesa & bank SMS ================= */
+const MSG_RULES = [
+  [/KPLC|KENYA POWER/, 'power'], [/WATER|NCWSC/, 'water'],
+  [/ZUKU|SAFARICOM HOME|FAIBA|STARLINK|DSTV|GOTV|SHOWMAX|NETFLIX|POA INTERNET/, 'internet'],
+  [/NAIVAS|QUICK ?MART|CARREFOUR|CHANDARANA|MAJID|CLEANSHELF|MAGUNAS|TUSKYS|KASSMATT|GROCER|BUTCHERY|MARKET|SUPERMARKET/, 'food'],
+  [/JAVA|KFC|CHICKEN INN|PIZZA|CAFE|RESTAURANT|ARTCAFFE|GLOVO|UBER ?EATS|BOLT FOOD|NYAMA/, 'eatout'],
+  [/UBER|BOLT|LITTLE CAB|FARAS|SHELL|TOTALENERGIES|RUBIS|OLA ENERGY|PETROL|SERVICE STATION|FUEL/, 'transport'],
+  [/HOSPITAL|PHARMA|CHEMIST|CLINIC|MEDICAL|SOCIAL HEALTH|\bSHA\b|DENTAL|OPTICA/, 'health'],
+  [/SCHOOL|ACADEMY|COLLEGE|UNIVERSITY|KUCCPS/, 'school'],
+  [/HELB|TALA|BRANCH|ZENKA|OKASH|HUSTLER/, 'loan'],
+  [/CHURCH|PARISH|CATHEDRAL|PCEA|\bACK\b|CATHOLIC|\bSDA\b|ADVENTIST|CITAM|MINISTR|TABERNACLE|FELLOWSHIP|GOSPEL/, 'church'],
+  [/AIRTIME|BUNDLE|AIRTEL|TELKOM|SAFARICOM/, 'airtime'],
+  [/\bRENT\b|APARTMENT|PROPERTIES|PROPERTY|LANDLORD|HOUSING/, 'rent'],
+  [/INSURANCE|JUBILEE|BRITAM|MADISON|OLD MUTUAL/, 'insurance'],
+  [/CHAMA|WELFARE/, 'chama'],
+  [/BETIKA|SPORTPESA|ODIBET|MOZZART|\bBET\b/, 'fun'],
+];
+const toNum = s => num(String(s).replace(/,/g, ''));
+const KEEP_UP = new Set(['KPLC','KCB','NCBA','ABSA','KRA','NHIF','SHA','SACCO','CBK','ATM','POS','TRM','DTB','UBA','GTB','HF','KWFT','CIC','APA','ICEA','JKIA','CBD','NSSF','HELB','ACK','PCEA','SDA','CITAM','TV','DSTV','KFC','II','III']);
+const titleCase = s => String(s).toLowerCase().replace(/[a-z0-9]+/g, w => KEEP_UP.has(w.toUpperCase()) || (w.length <= 4 && !/[aeiouy]/.test(w) && /[a-z]/.test(w) && !['rd','st','ltd','mt','dr','mr','mrs','ms'].includes(w)) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1)).replace(/\bM-pesa\b/gi, 'M-Pesa');
+const cleanParty = s => titleCase(String(s || '').replace(/\s+(?:\+?254|0)\d{9}\b.*$/, '').replace(/[\s.,]+$/, '').replace(/\s+/g, ' ').trim());
+const payeeKey = s => String(s || '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+function guessCat(party, type){
+  const k = payeeKey(party), learned = (S.settings.payees || {})[k];
+  if (learned && learned.type === type) return learned.cat;
+  if (type === 'income') return /SALARY|PAYROLL/.test(k) ? 'salary' : 'other_in';
+  for (const [re, cat] of MSG_RULES) if (re.test(k)) return cat;
+  return 'other_ex';
+}
+function msgDate(s){
+  let m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*(?:at\s*)?(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  const ok = (y, mo, d) => mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && y >= 2000 && y <= 2100;
+  if (m) {
+    let y = +m[3] < 100 ? 2000 + +m[3] : +m[3], h = +m[4]; const ap = (m[6] || '').toUpperCase();
+    if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0;
+    if (ok(y, +m[2], +m[1])) return {date:`${y}-${pad(m[2])}-${pad(m[1])}`, time:`${pad(h)}:${m[5]}`};
+  }
+  m = s.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if (m) { const y = +m[3] < 100 ? 2000 + +m[3] : +m[3]; if (ok(y, +m[2], +m[1])) return {date:`${y}-${pad(m[2])}-${pad(m[1])}`, time:''}; }
+  m = s.match(/(\d{4})-(\d{2})-(\d{2})/); if (m && ok(+m[1], +m[2], +m[3])) return {date:m[0], time:''};
+  return {date:todayISO(), time:'', guessedDate:true};
+}
+const A = '([\\d,]+(?:\\.\\d{1,2})?)';
+function parseMpesa(flat){
+  const code = (flat.match(/\b([A-Z0-9]{10})\b\s*[Cc]onfirmed/) || [])[1];
+  const r = Object.assign({raw:flat, ref:code, src:'mpesa'}, msgDate(flat));
+  const bal = flat.match(new RegExp('M-?PESA balance is\\s*Ksh\\s?' + A, 'i')); if (bal) r.bal = toNum(bal[1]);
+  const fee = flat.match(new RegExp('Transaction cost,?\\s*Ksh\\s?' + A, 'i')); r.fee = fee ? toNum(fee[1]) : 0;
+  const g = re => flat.match(new RegExp(re, 'i'));
+  let m;
+  if (/fuliza/i.test(flat) && !/sent to|paid to/i.test(flat)) return Object.assign(r, {skip:'Fuliza notice. Record Fuliza under Wealth → Debts.'});
+  if (/failed|insufficient|not enough|cancel+ed/i.test(flat)) return Object.assign(r, {skip:'Failed or cancelled, so no money moved.'});
+  if (/revers/i.test(flat)) return Object.assign(r, {skip:'Reversal notice. Delete or edit the original entry instead.'});
+  if ((m = g('You have received\\s*Ksh\\s?' + A + '\\s*from\\s+(.+?)\\s+(?:on\\s+\\d|(?:\\+?254|0)\\d{9}\\b)'))) return Object.assign(r, {kind:'in', amount:toNum(m[1]), party:cleanParty(m[2])});
+  if ((m = g('Ksh\\s?' + A + '\\s*sent to\\s+(.+?)\\s+for account\\s+(.+?)\\s+on\\s+\\d'))) return Object.assign(r, {kind:'out', amount:toNum(m[1]), party:cleanParty(m[2]), account:m[3].trim()});
+  if ((m = g('Ksh\\s?' + A + '\\s*paid to\\s+(.+?)\\.?\\s+on\\s+\\d'))) return Object.assign(r, {kind:'out', amount:toNum(m[1]), party:cleanParty(m[2])});
+  if ((m = g('Ksh\\s?' + A + '\\s*sent to\\s+(.+?)\\s+(?:on\\s+\\d|(?:\\+?254|0)\\d{9}\\b)'))) return Object.assign(r, {kind:'out', amount:toNum(m[1]), party:cleanParty(m[2])});
+  if ((m = g('Withdraw\\s*Ksh\\s?' + A + '\\s*from\\s+(.+?)\\s+New M-?PESA'))) return Object.assign(r, {kind:'withdraw', amount:toNum(m[1]), party:cleanParty(m[2].replace(/^\d+\s*-\s*/, ''))});
+  if ((m = g('Give\\s*Ksh\\s?' + A + '\\s*cash to\\s+(.+?)\\s+New M-?PESA'))) return Object.assign(r, {kind:'deposit', amount:toNum(m[1]), party:cleanParty(m[2])});
+  if ((m = g('bought\\s*Ksh\\s?' + A + '\\s*of airtime'))) return Object.assign(r, {kind:'out', amount:toNum(m[1]), party:'Airtime', cat:'airtime'});
+  if ((m = g('Ksh\\s?' + A + '\\s*transferred to\\s+(.+?)\\s+account'))) return Object.assign(r, {kind:'save', amount:toNum(m[1]), party:cleanParty(m[2])});
+  if ((m = g('Ksh\\s?' + A + '\\s*transferred from\\s+(.+?)\\s+account'))) return Object.assign(r, {kind:'unsave', amount:toNum(m[1]), party:cleanParty(m[2])});
+  if ((m = g('Ksh\\s?' + A))) return Object.assign(r, {kind:/received|deposit/i.test(flat) ? 'in' : 'out', amount:toNum(m[1]), party:'', unsure:true});
+  return Object.assign(r, {skip:'No amount found in this message.'});
+}
+function parseBank(flat){
+  const r = Object.assign({raw:flat, src:'bank', unsure:true}, msgDate(flat));
+  const am = flat.match(/(?:KES|KSH|Kshs?\.?)\s?([\d,]+(?:\.\d{1,2})?)/i);
+  if (!am) return Object.assign(r, {skip:'No amount found in this message.'});
+  r.amount = toNum(am[1]); r.fee = 0;
+  const ref = flat.match(/\b(?:Ref(?:erence)?(?:\s*No)?|Txn(?:\s*ID)?|Transaction ID)[\s:.#]*([A-Z0-9]{6,})/i) || flat.match(/\b([A-Z0-9]{10,12})\b/);
+  if (ref && /[A-Z]/i.test(ref[1]) && /\d/.test(ref[1])) r.ref = ref[1].toUpperCase();
+  const bal = flat.match(/bal(?:ance)?\.?\s*(?:is|:)?\s*(?:KES|KSH|Kshs?\.?)\s?([\d,]+(?:\.\d{1,2})?)/i); if (bal) r.bal = toNum(bal[1]);
+  const credit = /credited|received|deposited|paid into|incoming/i.test(flat), debit = /debited|withdrawn|withdrawal|purchase|spent|sent to|transferred to|paid to/i.test(flat);
+  r.kind = credit && !debit ? 'in' : debit && !credit ? 'out' : /credited/i.test(flat) ? 'in' : 'out';
+  const party = flat.match(/\b(?:to|from|at)\s+([A-Z][A-Za-z0-9&' -]{2,40}?)(?=\s+(?:on|ref|via|for|Avail|Bal)\b|[.,]|$)/);
+  r.party = party ? cleanParty(party[1]) : '';
+  return r;
+}
+function splitMsgs(raw){
+  const text = String(raw || '').replace(/\r/g, '');
+  const re = /\b[A-Z0-9]{10}\s*[Cc]onfirmed/g, idx = []; let m;
+  while ((m = re.exec(text))) idx.push(m.index);
+  const chunks = idx.length ? idx.map((s, i) => text.slice(s, idx[i + 1])) : text.split(/\n\s*\n/);
+  if (idx.length && idx[0] > 0 && text.slice(0, idx[0]).trim().length > 25) chunks.unshift(...text.slice(0, idx[0]).split(/\n\s*\n/));
+  return chunks.flatMap(c => c.split(/\n\s*\n/)).map(c => c.replace(/\s+/g, ' ').trim()).filter(c => c.length > 8);
+}
+const parseMsg = flat => /\b[A-Z0-9]{10}\s*[Cc]onfirmed/.test(flat) || /M-?PESA/i.test(flat) ? parseMpesa(flat) : parseBank(flat);
+const mobileAcct = () => (S.accounts.find(a => a.kind === 'mobile') || S.accounts[0]).id;
+const bankAcct = () => (S.accounts.find(a => a.kind === 'bank') || S.accounts[0]).id;
+const cashAcct = () => (S.accounts.find(a => a.kind === 'cash') || S.accounts.find(a => a.kind !== 'mobile') || S.accounts[0]).id;
+const savingsAcct = name => { const k = payeeKey(name); const a = S.accounts.find(x => payeeKey(x.name).includes(k) || k.includes(payeeKey(x.name))) || S.accounts.find(x => /SHWARI|LOCK|SAVINGS/.test(payeeKey(x.name))) || S.accounts.find(x => x.kind === 'sacco'); return a ? a.id : null; };
+const firstWord = s => payeeKey(s).split(' ')[0] || '';
+function msgToRow(p, claimed){
+  const row = {id:uid(), p, include:true, status:'new', ref:p.ref || '', bal:p.bal, date:p.date, time:p.time || '', amount:p.amount || 0, fee:p.fee || 0, party:p.party || '', note:''};
+  if (p.skip) return Object.assign(row, {status:'skip', include:false, why:p.skip});
+  const home = p.src === 'mpesa' ? mobileAcct() : bankAcct();
+  row.balAcct = home;
+  if (p.kind === 'in') Object.assign(row, {type:'income', acct:home, cat:guessCat(p.party, 'income'), note:p.party});
+  else if (p.kind === 'out') Object.assign(row, {type:'expense', acct:home, cat:p.cat || guessCat(p.party, 'expense'), note:[p.party, p.account ? 'acc ' + p.account : ''].filter(Boolean).join(' · ')});
+  else if (p.kind === 'withdraw') Object.assign(row, {type:'transfer', acct:home, to:cashAcct(), note:'Withdrawal' + (p.party ? ' · ' + p.party : '')});
+  else if (p.kind === 'deposit') Object.assign(row, {type:'transfer', acct:cashAcct(), to:home, note:'Deposit' + (p.party ? ' · ' + p.party : ''), fee:0});
+  else if (p.kind === 'save' || p.kind === 'unsave') { const sv = savingsAcct(p.party); if (sv) Object.assign(row, p.kind === 'save' ? {type:'transfer', acct:home, to:sv} : {type:'transfer', acct:sv, to:home, fee:0}, {note:p.party}); else Object.assign(row, p.kind === 'save' ? {type:'expense', acct:home, cat:'other_ex'} : {type:'income', acct:home, cat:'other_in'}, {note:p.party + ' (add it as an account to track it)'}); }
+  if (row.type === 'income') {
+    const L = S.lent.find(x => num(x.balance) > 0 && firstWord(x.name) && firstWord(x.name) === firstWord(p.party));
+    if (L) Object.assign(row, {lentId:L.id, type: row.amount <= num(L.balance) + 0.5 ? 'repay' : 'income'});
+  }
+  if (row.type === 'expense') {
+    const k = payeeKey(p.party);
+    const d = k && S.debts.find(x => num(x.balance) > 0 && [x.lender, x.name].some(n => { const nk = payeeKey(n); return nk.length > 2 && (k.includes(nk) || nk.includes(k)); }));
+    if (d) Object.assign(row, {cat:'loan', debtId:d.id});
+  }
+  if (row.ref && (txAll().some(t => t.ref === row.ref) || claimed.refs.has(row.ref))) return Object.assign(row, {status:'dup', include:false, why:'Already in Hazina'});
+  if (row.ref) claimed.refs.add(row.ref);
+  const t0 = Date.parse(row.date);
+  const cand = txAll().find(t => !t.ref && !t.feeOf && !t.kind && !claimed.ids.has(t.id) && t.type === (row.type === 'repay' ? '-' : row.type) && t.acct === row.acct && (row.type !== 'transfer' || t.to === row.to) && Math.abs(t.amount - row.amount) < 1 && Math.abs(Date.parse(t.date) - t0) <= 864e5 * 1.01);
+  if (cand) { claimed.ids.add(cand.id); Object.assign(row, {status:'match', matchId:cand.id, why:`Matches your entry “${cand.note || CAT_NAME[cand.cat] || 'Transfer'}” on ${fmtDate(cand.date)}`}); }
+  if (p.guessedDate) row.why = (row.why ? row.why + '. ' : '') + 'No date found, so today is used.';
+  if (p.unsure && row.status === 'new') row.why = 'Couldn’t read this message fully. Check the details.';
+  return row;
+}
+let IMP = [];
+function openImport(prefill){
+  if (guardSample()) return;
+  IMP = [];
+  openSheet('Import messages', `<div class="f">
+    <p class="small muted" style="margin:0">Paste one or more M-Pesa or bank messages. In the Messages app you can also select a message, tap <b>Share</b> and choose <b>Hazina</b>. Hazina keeps only the amount, date, code and balance, not the message text.</p>
+    <label class="fld"><span>Messages</span><textarea id="impText" rows="6" class="msgarea" placeholder="TJK3H5XYZ1 Confirmed. Ksh350.00 paid to NAIVAS SUPERMARKET. on 18/10/26 at 1:20 PM. New M-PESA balance is Ksh12,345.67. Transaction cost, Ksh0.00.">${esc(prefill || '')}</textarea></label>
+    <div class="btns"><button type="button" class="btn sm" data-act="imp-read">Read messages</button></div>
+    <div id="impList"></div></div>`);
+  if (prefill) readImport();
+}
+function readImport(){
+  const raw = ($('#impText') || {}).value || '';
+  const claimed = {refs:new Set(), ids:new Set()};
+  IMP = splitMsgs(raw).map(parseMsg).map(p => msgToRow(p, claimed));
+  renderImport();
+}
+const IMP_LABEL = {new:'New', match:'Will link', dup:'Already recorded', skip:'Skipped'};
+function impRow(r, i){
+  const head = `<div class="item-h"><div style="min-width:0"><h3 class="num">${r.amount ? ksh(r.amount) : '—'}${r.fee > 0 ? ` <span class="small muted">+ ${ksh(r.fee)} cost</span>` : ''}</h3><div class="muted">${[esc(r.party || ''), fmtDate(r.date) + (r.time ? ' ' + r.time : ''), esc(r.ref || '')].filter(Boolean).join(' · ')}</div></div><span class="pill ${r.status === 'skip' || r.status === 'dup' ? '' : r.status === 'match' ? 'solid' : ''}">${IMP_LABEL[r.status]}</span></div>`;
+  const why = r.why ? `<div class="small ${r.status === 'skip' ? 'muted' : 'muted'}">${esc(r.why)}</div>` : '';
+  if (r.status === 'skip' || r.status === 'dup') return `<div class="item imp off">${head}${why}</div>`;
+  if (r.status === 'match') return `<div class="item imp">${head}${why}<label class="toggle"><input type="checkbox" data-imp="include" data-i="${i}" ${r.include ? 'checked' : ''}><span>Link this message to that entry</span></label></div>`;
+  const L = r.lentId && S.lent.find(x => x.id === r.lentId);
+  const types = [['expense', 'Expense'], ['income', 'Income'], ['transfer', 'Transfer']].concat(L ? [['repay', 'Repayment from ' + L.name]] : []);
+  const acctSel = (name, val) => `<select data-imp="${name}" data-i="${i}">${S.accounts.map(a => `<option value="${esc(a.id)}" ${a.id === val ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>`;
+  return `<div class="item imp">${head}${why}
+    <label class="toggle"><input type="checkbox" data-imp="include" data-i="${i}" ${r.include ? 'checked' : ''}><span>Import</span></label>
+    <div class="row2"><label class="fld"><span>Type</span><select data-imp="type" data-i="${i}">${types.map(([k, l]) => `<option value="${k}" ${r.type === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+    ${r.type === 'transfer' ? `<label class="fld"><span>To</span>${acctSel('to', r.to)}</label>` : r.type === 'repay' ? `<label class="fld"><span>Into</span>${acctSel('acct', r.acct)}</label>` : `<label class="fld"><span>Category</span><select data-imp="cat" data-i="${i}">${catOpts(r.type, r.cat)}</select></label>`}</div>
+    ${r.type === 'expense' && r.cat === 'loan' && S.debts.length ? `<label class="fld"><span>Which loan does this pay?</span><select data-imp="debtId" data-i="${i}"><option value="">Not linked to a loan</option>${S.debts.map(d => `<option value="${esc(d.id)}" ${r.debtId === d.id ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select></label>` : ''}
+    ${r.type !== 'repay' ? `<div class="row2"><label class="fld"><span>${r.type === 'income' ? 'Received into' : 'From'}</span>${acctSel('acct', r.acct)}</label><label class="fld"><span>Note</span><input data-imp="note" data-i="${i}" maxlength="80" value="${esc(r.note || '')}"></label></div>` : ''}
+  </div>`;
+}
+function renderImport(){
+  const el = $('#impList'); if (!el) return;
+  if (!IMP.length) { el.innerHTML = '<div class="empty">No messages found. Paste the full message text, starting with the M-Pesa code.</div>'; return; }
+  const n = IMP.filter(r => r.include && r.status === 'new').length, mt = IMP.filter(r => r.include && r.status === 'match').length;
+  const skipped = IMP.filter(r => r.status === 'skip' || r.status === 'dup').length;
+  el.innerHTML = `<p class="small muted" style="margin:6px 0 0">${IMP.length} message${IMP.length === 1 ? '' : 's'} read · ${n} new · ${mt} to link · ${skipped} skipped</p>
+    <div>${IMP.map(impRow).join('')}</div>
+    <div class="f-actions"><button type="button" class="btn" data-act="imp-save" ${n + mt ? '' : 'disabled'}>Import ${n + mt}</button></div>`;
+}
+function saveImport(){
+  const months = new Set(); let added = 0, linked = 0; S.settings.payees ||= {};
+  for (const r of IMP) {
+    if (!r.include || (r.status !== 'new' && r.status !== 'match')) continue;
+    if (r.ref && txAll().some(t => t.ref === r.ref)) continue;
+    if (r.status === 'match') {
+      const t = findTxn(r.matchId); if (!t) continue;
+      Object.assign(t, {ref:r.ref || undefined, bal:r.bal, balAcct:r.balAcct, time:r.time || t.time});
+      if (r.fee > 0 && !(t.fee > 0) && t.type !== 'income') { t.fee = r.fee; (M[ymOf(t.date)] ||= []).push(feeChild(t)); }
+      months.add(ymOf(t.date)); linked++; TX = null; continue;
+    }
+    let t;
+    if (r.type === 'repay') {
+      const L = S.lent.find(x => x.id === r.lentId); if (!L) continue;
+      t = {id:uid(), ts:Date.now(), type:'transfer', acct:'lent:' + L.id, to:r.acct, amount:r.amount, date:r.date, note:'Repaid by ' + L.name, lentId:L.id, kind:'repay'};
+      L.balance = Math.max(0, Math.round((num(L.balance) - r.amount) * 100) / 100); (L.payments ||= []).push({id:t.id, date:r.date, amount:r.amount});
+    } else {
+      t = {id:uid(), ts:Date.now(), type:r.type, amount:r.amount, date:r.date, acct:r.acct, note:(r.note || '').slice(0, 80)};
+      if (r.type === 'transfer') { if (r.to === r.acct) continue; t.to = r.to; }
+      else { t.cat = r.cat; if (r.type === 'expense' && r.cat === 'loan' && r.debtId) t.debtId = r.debtId; }
+      if (r.type !== 'income' && r.fee > 0) t.fee = r.fee;
+      if (r.party && r.type !== 'transfer') S.settings.payees[payeeKey(r.party)] = {type:r.type, cat:r.cat};
+    }
+    if (r.ref) t.ref = r.ref; if (r.bal !== undefined) { t.bal = r.bal; t.balAcct = r.balAcct; } if (r.time) t.time = r.time;
+    linkTxn(t, 1);
+    (M[ymOf(t.date)] ||= []).push(t); if (t.fee > 0) M[ymOf(t.date)].push(feeChild(t));
+    months.add(ymOf(t.date)); added++; TX = null;
+  }
+  closeSheet(); IMP = []; commit({profile:true, months:[...months]});
+  toast([added ? `${added} imported` : '', linked ? `${linked} linked` : ''].filter(Boolean).join(', ') || 'Nothing to import');
+}
+async function checkShared(){
+  if (isLocked() || !S) return;
+  try { if (location.search) history.replaceState(null, '', location.pathname + location.hash); } catch(e) {}
+  let sh; try { sh = await kvGet('shared'); } catch(e) { return; }
+  if (!sh || !sh.length) return;
+  try { await kvSet('shared', []); } catch(e) {}
+  if (MODE === 'sample') { toast('Start your own tracker first, then share the message again.'); return; }
+  UI.view = 'activity'; render(); openImport(sh.map(x => x.text).join('\n\n'));
+}
+
+/* ---------- reconciliation ---------- */
+const tkey = t => t.date + ' ' + (t.time || '24:00') + ' ' + (t.feeOf ? 1 : 0);
+function balanceThrough(id, key){
+  const a = S.accounts.find(x => x.id === id); let b = a ? num(a.opening) : 0;
+  for (const t of txAll()) { if (tkey(t) > key) continue;
+    if (t.type === 'income' && t.acct === id) b += t.amount;
+    else if (t.type === 'expense' && t.acct === id) b -= t.amount;
+    else if (t.type === 'transfer') { if (t.acct === id) b -= t.amount; if (t.to === id) b += t.amount; } }
+  return b;
+}
+function checkpoints(id){
+  return txAll().filter(t => t.balAcct === id && t.bal !== undefined && t.bal !== null).sort((a, b) => tkey(a) < tkey(b) ? -1 : 1)
+    .map(t => { const app = balanceThrough(id, t.date + ' ' + (t.time || '24:00') + ' 1'); return {t, msg:num(t.bal), app, diff:Math.round((num(t.bal) - app) * 100) / 100}; });
+}
+function reconStatus(id){
+  const cps = checkpoints(id); if (!cps.length) return null;
+  const last = cps[cps.length - 1];
+  const unmatched = txAll().filter(t => (t.acct === id || t.to === id) && !t.ref && !t.feeOf && t.date >= cps[0].t.date).length;
+  return {last, cps, unmatched};
+}
+function reconCard(){
+  const rows = S.accounts.map(a => {
+    const st = reconStatus(a.id);
+    const pill = !st ? '<span class="pill">No messages yet</span>' : Math.abs(st.last.diff) < 1 ? '<span class="pill solid">Matches</span>' : `<span class="pill warn">Off by ${ksh(Math.abs(st.last.diff))}</span>`;
+    const sub = st ? `Last message ${esc(st.last.t.ref || '')} · ${fmtDate(st.last.t.date)}${st.unmatched ? ` · ${st.unmatched} entr${st.unmatched === 1 ? 'y' : 'ies'} without a message` : ''}` : 'Import messages to check this balance';
+    return `<button class="acct" data-act="recon" data-id="${esc(a.id)}"><span class="tx-ic">${a.kind === 'mobile' ? 'MP' : a.kind === 'bank' ? 'BK' : a.kind === 'cash' ? 'KS' : 'SC'}</span><span class="tx-main"><span class="tx-title">${esc(a.name)}</span><span class="tx-sub">${sub}</span></span>${pill}</button>`;
+  }).join('');
+  return `<section class="card"><div class="card-h"><h2>Reconcile</h2><button class="btn sm ghost" data-act="open-import">Import messages</button></div>
+    <div>${rows}</div>
+    <p class="small muted" style="margin:12px 0 0">Each M-Pesa message shows your new balance. Hazina compares it with its own balance at that moment, so you can spot missing or doubled entries.</p></section>`;
+}
+function openRecon(id){
+  const a = S.accounts.find(x => x.id === id); if (!a) return;
+  const st = reconStatus(id), app = acctBalance(id);
+  let body = '';
+  if (st) {
+    const cps = st.cps.slice(-10);
+    let gapAt = -1; for (let i = st.cps.length - 1; i > 0; i--) { if (Math.abs(st.cps[i].diff - st.cps[i - 1].diff) >= 1) { gapAt = i; break; } }
+    const gapMsg = Math.abs(st.last.diff) < 1 ? `Hazina matches your last ${a.name} message (${esc(st.last.t.ref || '')}, ${fmtDate(st.last.t.date)}).`
+      : gapAt > 0 ? `The gap of ${ksh(Math.abs(st.cps[gapAt].diff - st.cps[gapAt - 1].diff))} first appears between ${fmtDate(st.cps[gapAt - 1].t.date)} and ${fmtDate(st.cps[gapAt].t.date)}. Look for a missing, doubled or wrong entry in those dates.`
+      : `Hazina has been ${st.last.diff > 0 ? 'lower' : 'higher'} than your messages since the first one. The opening balance is probably off.`;
+    body += `<p style="margin:0 0 10px">${gapMsg}</p>
+      <div class="table-wrap"><table class="t"><thead><tr><th>Message</th><th class="r">${esc(a.name)} said</th><th class="r">Hazina</th><th class="r">Gap</th></tr></thead><tbody>
+      ${cps.slice().reverse().map(c => `<tr><td><span class="num">${fmtDate(c.t.date).slice(0, -5)}${c.t.time ? ' ' + c.t.time : ''}</span><br><span class="small muted">${esc(c.t.ref || '')}</span></td><td class="r">${ksh(c.msg)}</td><td class="r">${ksh(c.app)}</td><td class="r ${Math.abs(c.diff) >= 1 ? 'neg' : ''}">${Math.abs(c.diff) < 1 ? '✓' : (c.diff > 0 ? '+' : '−') + ksh(Math.abs(c.diff)).replace('KSh ', '')}</td></tr>`).join('')}
+      </tbody></table></div>
+      ${st.unmatched ? `<p class="small muted" style="margin:10px 0 0">${st.unmatched} ${a.name} entr${st.unmatched === 1 ? 'y has' : 'ies have'} no matching message. <button class="link" data-act="show-unmatched">Show them</button></p>` : ''}
+      ${Math.abs(st.last.diff) >= 1 ? `<div class="btns" style="margin-top:12px"><button class="btn sm ghost" data-act="recon-fix" data-id="${esc(id)}" data-v="${st.last.diff}">Adjust opening balance by ${(st.last.diff > 0 ? '+' : '−') + ksh(Math.abs(st.last.diff))}</button></div>` : ''}`;
+  } else body += `<p class="small muted" style="margin:0 0 10px">No messages with a balance yet. Import M-Pesa messages, or check against the balance in your ${esc(a.name)} app below.</p>`;
+  body += `<form class="f" data-form="recon-manual" data-id="${esc(id)}" style="margin-top:16px"><label class="fld"><span>Balance shown in your ${esc(a.name)} app right now (KSh)</span><input name="actual" inputmode="decimal" placeholder="e.g. ${Math.round(app)}"></label><p class="small muted" id="reconDiff" style="margin:0">Hazina shows ${ksh(app)}.</p><div class="ferr" role="alert"></div><div class="f-actions"><button type="submit" class="btn">Match this balance</button></div></form>`;
+  openSheet('Reconcile ' + a.name, body);
+}
+
 /* ================= boot ================= */
 (async function boot(){
   try { await IDB.open(); } catch(e) {}
@@ -1901,7 +2224,7 @@ document.addEventListener('keydown', e => {
   if (saved && saved.S) { S = normalize(saved.S); M = saved.M || {}; MODE = 'real'; }
   else { const s = makeSample(); S = s.p; M = s.months; MODE = 'sample'; }
   if (location.hash && /^#(home|activity|budget|wealth|reports|more)$/.test(location.hash)) UI.view = location.hash.slice(1);
-  applyTheme(); render(); setStatus();
+  applyTheme(); render(); setStatus(); checkShared();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost','127.0.0.1'].includes(location.hostname))) navigator.serviceWorker.register('./sw.js').then(registerBackground).catch(() => {});
   try { if (navigator.storage && navigator.storage.persisted) PERSISTED = await navigator.storage.persisted(); } catch(e) {}
   window.addEventListener('online', () => { setStatus(); checkBackup(); });
@@ -1909,7 +2232,7 @@ document.addEventListener('keydown', e => {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { writeData(); hiddenAt = Date.now(); if (LOCK.enabled && +LOCK.after === 0) { if (lockCtx && !isLocked()) hideLock(); lockNow(false); } }
     else {
-      checkBackup(); scheduleMidnight();
+      checkBackup(); scheduleMidnight(); setTimeout(() => checkShared(), 120);
       if (LOCK.enabled && !isLocked() && hiddenAt && Date.now() - hiddenAt >= LOCK.after * 1000) { if (lockCtx) hideLock(); lockNow(true); }
       else if (isLocked()) setTimeout(tryBio, 300);
     }

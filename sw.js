@@ -1,5 +1,5 @@
 /* Hazina Money service worker: offline app shell + background Google Drive backup. */
-const VERSION = 'hazina-v6';
+const VERSION = 'hazina-v7';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './jspdf.umd.min.js', './jspdf.plugin.autotable.min.js'];
 const FONT_CACHE = 'hazina-fonts';
 
@@ -17,6 +17,18 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const req = event.request;
+  // Messages shared from Android's share menu: keep them on the phone, never send them to the network.
+  if (req.method === 'POST' && new URL(req.url).pathname.endsWith('/share-target')) {
+    event.respondWith((async () => {
+      try {
+        const fd = await req.formData();
+        const text = ['title', 'text', 'url'].map(k => fd.get(k)).filter(v => typeof v === 'string' && v.trim()).join('\n');
+        if (text) { const db = await openDb(); const cur = (await get(db, 'shared')) || []; cur.push({text, at: Date.now()}); await put(db, 'shared', cur.slice(-50)); }
+      } catch (e) {}
+      return Response.redirect(new URL('./?shared=1', self.registration.scope).href, 303);
+    })());
+    return;
+  }
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
